@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python -m pytest -q
+      - run: python -m pip wheel . --no-deps --wheel-dir dist
+      - name: Smoke-test the built wheel outside the checkout
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP 'smd-twin-wheel-smoke'
+          py -3.13 -m venv $smoke
+          $python = Join-Path $smoke 'Scripts\python.exe'
+          $wheel = Get-ChildItem dist\smd_twin_lab-*.whl | Select-Object -First 1
+          & $python -m pip install $wheel.FullName
+          Push-Location $env:RUNNER_TEMP
+          & $python -m smd_twin_lab.cli tools
+          & $python -m smd_twin_lab.cli demo --engine reference --fault none
+          & $python -m smd_twin_lab.cli demo --engine reference --fault thermistor_open
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          & $python -c "from smd_twin_lab.app import create_application, build_window; app=create_application([]); window=build_window(); assert window.project.name == 'USB Sensor/Status Board'; window.close()"
+          Pop-Location

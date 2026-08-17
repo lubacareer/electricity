@@ -1,0 +1,32 @@
+(kicad_sch
+	(version 20250114)
+	(generator "eeschema")
+	(generator_version "10.0")
+	(uuid "98e8d4de-d257-4fb3-a8e0-2c58db43d8f4")
+	(paper "A4")
+	(title_block
+		(title "SMD Twin Lab USB Sensor/Status Board")
+		(date "2026-08-17")
+		(rev "V1 educational")
+		(company "SMD Twin Lab")
+		(comment 1 "Circuit semantics and full component set are described by twin.yaml")
+	)
+	(lib_symbols)
+	(text "The checked-in normalized bundle is the first-release source. This schematic is intentionally minimal until the STM32G071 Renode qualification gate passes."
+		(exclude_from_sim no)
+		(at 100 70 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "24c35822-4910-454d-adfd-9c4d589a61a5")
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)

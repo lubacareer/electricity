@@ -1,0 +1,13 @@
+* SMD Twin Lab: NTC divider reference circuit
+.title USB sensor/status board analog front end
+.param VSUPPLY=3.3
+.param R_FIXED=10k
+.param R_SENSOR=10k
+VDD vdd 0 {VSUPPLY}
+R_FIXED vdd adc {R_FIXED}
+R_SENSOR adc 0 {R_SENSOR}
+C_ADC adc 0 100n
+.save v(vdd) v(adc) i(VDD)
+.op
+.tran 100u 100m
+.end

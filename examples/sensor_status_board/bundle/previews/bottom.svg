@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" role="img" aria-label="Bottom of USB sensor status PCB">
+  <rect width="800" height="500" rx="28" fill="#123e2e" stroke="#9cc6a8" stroke-width="8"/>
+  <g transform="translate(800 0) scale(-1 1)">
+    <rect x="90" y="345" width="110" height="70" fill="#242a31" stroke="#d9b65b" stroke-width="5"/>
+    <text x="145" y="385" fill="#ffffff" font-family="Consolas, monospace" font-size="18" text-anchor="middle">J2 SWD</text>
+    <g fill="#d9b65b">
+      <circle cx="250" cy="100" r="8"/><circle cx="300" cy="100" r="8"/><circle cx="350" cy="100" r="8"/>
+      <circle cx="400" cy="100" r="8"/><circle cx="450" cy="100" r="8"/>
+    </g>
+  </g>
+  <text x="400" y="35" fill="#d7e3da" font-family="Segoe UI, sans-serif" text-anchor="middle" font-size="20">BOTTOM VIEW · MIRRORED FOR DISPLAY</text>
+</svg>

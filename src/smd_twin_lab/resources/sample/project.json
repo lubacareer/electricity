@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "project_id": "sensor-status-v1",
+  "name": "USB Sensor/Status Board",
+  "source_dir": ".",
+  "cache_dir": ".",
+  "source_hashes": {},
+  "kicad_version": "10.0.5",
+  "variant": "default",
+  "components": [
+    {"reference":"J1","value":"USB-C Power","footprint":"Connector_USB:USB_C_Receptacle_USB2.0_16P","x_mm":8.0,"y_mm":25.0,"rotation_deg":90.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["VBUS_5V","GND","USB_D+","USB_D-"],"fields":{}},
+    {"reference":"U3","value":"USB-UART","footprint":"Package_DFN_QFN:QFN-24","x_mm":20.0,"y_mm":25.0,"rotation_deg":0.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["VBUS_5V","VDD_3V3","UART_RX","UART_TX","GND"],"fields":{}},
+    {"reference":"U2","value":"3.3 V LDO","footprint":"Package_TO_SOT_SMD:SOT-23-5","x_mm":29.0,"y_mm":40.0,"rotation_deg":0.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["VBUS_5V","VDD_3V3","GND"],"fields":{}},
+    {"reference":"U1","value":"STM32G071RBTx","footprint":"Package_QFP:LQFP-64_10x10mm_P0.5mm","x_mm":42.0,"y_mm":25.0,"rotation_deg":0.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["VDD_3V3","GND","ADC_SENSE","LED_GREEN","LED_RED","BUZZER","ACK_BUTTON","UART_RX","UART_TX","SWDIO","SWCLK"],"fields":{}},
+    {"reference":"R1","value":"10k","footprint":"Resistor_SMD:R_0805_2012Metric","x_mm":60.0,"y_mm":40.0,"rotation_deg":90.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["VDD_3V3","ADC_SENSE"],"fields":{}},
+    {"reference":"RT1","value":"NTC 10k","footprint":"Resistor_SMD:R_0805_2012Metric","x_mm":60.0,"y_mm":33.0,"rotation_deg":90.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["ADC_SENSE","GND"],"fields":{"beta":"3950 K"}},
+    {"reference":"D1","value":"GREEN","footprint":"LED_SMD:LED_0805_2012Metric","x_mm":61.0,"y_mm":23.0,"rotation_deg":0.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["LED_GREEN","GND"],"fields":{}},
+    {"reference":"D2","value":"RED","footprint":"LED_SMD:LED_0805_2012Metric","x_mm":68.0,"y_mm":23.0,"rotation_deg":0.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["LED_RED","GND"],"fields":{}},
+    {"reference":"Q1","value":"Buzzer driver","footprint":"Package_TO_SOT_SMD:SOT-23","x_mm":60.0,"y_mm":13.0,"rotation_deg":0.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["BUZZER","BUZZER_LOAD","GND"],"fields":{}},
+    {"reference":"BZ1","value":"Piezo","footprint":"Buzzer_Beeper:Buzzer_15x7.5RM7.6","x_mm":70.0,"y_mm":11.0,"rotation_deg":0.0,"side":"front","in_bom":true,"on_board":true,"is_smd":false,"nets":["VDD_3V3","BUZZER_LOAD"],"fields":{}},
+    {"reference":"SW1","value":"ACK","footprint":"Button_Switch_SMD:SW_SPST_TL3301AN","x_mm":30.0,"y_mm":10.0,"rotation_deg":0.0,"side":"front","in_bom":true,"on_board":true,"is_smd":true,"nets":["ACK_BUTTON","GND"],"fields":{}},
+    {"reference":"J2","value":"SWD","footprint":"Connector_PinHeader_1x05_P1.27mm_Vertical","x_mm":14.0,"y_mm":10.0,"rotation_deg":0.0,"side":"back","in_bom":true,"on_board":true,"is_smd":true,"nets":["VDD_3V3","SWDIO","SWCLK","NRST","GND"],"fields":{}}
+  ],
+  "nets": [
+    {"name":"GND","pins":[]}, {"name":"VBUS_5V","pins":[]}, {"name":"VDD_3V3","pins":[]},
+    {"name":"ADC_SENSE","pins":[{"reference":"R1","pin":"2"},{"reference":"RT1","pin":"1"},{"reference":"U1","pin":"14"}]},
+    {"name":"LED_GREEN","pins":[]}, {"name":"LED_RED","pins":[]}, {"name":"BUZZER","pins":[]},
+    {"name":"ACK_BUTTON","pins":[]}, {"name":"UART_RX","pins":[]}, {"name":"UART_TX","pins":[]},
+    {"name":"SWDIO","pins":[]}, {"name":"SWCLK","pins":[]}, {"name":"NRST","pins":[]},
+    {"name":"USB_D+","pins":[]}, {"name":"USB_D-","pins":[]}, {"name":"BUZZER_LOAD","pins":[]}
+  ],
+  "geometry": {
+    "outline_path": null,
+    "top_preview_path": "previews/top.svg",
+    "bottom_preview_path": "previews/bottom.svg",
+    "min_x_mm": 0.0,
+    "min_y_mm": 0.0,
+    "max_x_mm": 80.0,
+    "max_y_mm": 50.0
+  },
+  "capabilities": {
+    "geometry": {"status":"available","detail":"Bundled normalized board and previews"},
+    "circuit": {"status":"available","detail":"NTC divider ngspice fixture"},
+    "firmware": {"status":"available","detail":"Reference state model; Renode plugin qualification pending"},
+    "hardware": {"status":"unavailable","detail":"No physical target connected"}
+  },
+  "diagnostics": [],
+  "spice_netlist_path": "circuit.cir",
+  "twin_manifest_path": "twin.yaml"
+}

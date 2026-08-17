@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.smd-twin-cache/
+.tools/
+run-reports/
+*.sqlite3
+*.kicad_prl
+.check-*

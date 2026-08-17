@@ -1,0 +1,52 @@
+schema_version: 1
+project_id: sensor-status-v1
+name: USB Sensor/Status Board
+coordinate_system:
+  unit: mm
+  viewpoint: top
+  x_direction: right
+  y_direction: up
+  rotation: counter_clockwise_degrees
+firmware:
+  engine: renode
+  platform: stm32g071
+  executable: firmware/build/sensor_status_board.elf
+  bindings:
+    adc_temperature: ADC_SENSE
+    green_led: LED_GREEN
+    red_led: LED_RED
+    buzzer: BUZZER
+    acknowledge: ACK_BUTTON
+simulation:
+  engine: ngspice
+  netlist: sensor_status_board.cir
+  probes: [VDD_3V3, ADC_SENSE]
+faults:
+  - id: thermistor_open
+    kind: component_open
+    reference: RT1
+    resistance_ohm: 1000000000000
+  - id: divider_wrong_value
+    kind: wrong_value
+    reference: R1
+  - id: led_red_open
+    kind: component_open
+    reference: D2
+scenarios:
+  - id: nominal_25c
+    name: Nominal board at 25 C
+    temperature_c: 25.0
+    fault: none
+  - id: thermistor_open
+    name: Open NTC thermistor
+    temperature_c: 25.0
+    fault: thermistor_open
+lessons:
+  ADC_SENSE: ntc_voltage_divider
+  RT1: open_circuit
+  firmware_alarm: hysteresis
+  comparison: aoi_vs_functional_test
+hardware:
+  protocol: jsonl-v1
+  transport: usb-uart
+  fixture_transport: deferred
