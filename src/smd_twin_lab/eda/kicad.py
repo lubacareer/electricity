@@ -463,7 +463,7 @@ def render_board(document: EdaProjectDocument) -> str:
         track_forms.append(
             f"""\t(segment (start {sx} {sy}) (end {ex} {ey})
 \t\t(width {_mm(track.width_nm)}) (layer {_quote(track.layer.value)})
-\t\t(net {net_ids[track.net]}) (uuid {_quote(_uuid(track.track_id))}))"""
+\t\t(net {net_ids[track.net] if track.net else 0}) (uuid {_quote(_uuid(track.track_id))}))"""
         )
     via_forms = []
     for via in document.board.vias:
@@ -471,7 +471,7 @@ def render_board(document: EdaProjectDocument) -> str:
         via_forms.append(
             f"""\t(via (at {x} {y}) (size {_mm(via.diameter_nm)})
 \t\t(drill {_mm(via.drill_nm)}) (layers "F.Cu" "B.Cu")
-\t\t(net {net_ids[via.net]}) (uuid {_quote(_uuid(via.via_id))}))"""
+\t\t(net {net_ids[via.net] if via.net else 0}) (uuid {_quote(_uuid(via.via_id))}))"""
         )
     net_forms = "\n".join(
         f"\t(net {identifier} {_quote(_board_net_name(name))})"

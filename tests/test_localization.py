@@ -79,6 +79,21 @@ def test_message_ref_is_json_safe_and_model_additions_are_compatible() -> None:
         MessageRef(" ")
 
 
+def test_message_ref_deep_copies_nested_parameters() -> None:
+    references = ["R2"]
+    metadata = {"unit": "ohm"}
+    parameters = {"context": {"references": references, "metadata": metadata}}
+
+    message_ref = MessageRef("diagnostic.example", parameters)
+    references.append("R3")
+    metadata["unit"] = "kohm"
+
+    assert type(message_ref.parameters) is dict
+    assert message_ref.parameters == {
+        "context": {"references": ["R2"], "metadata": {"unit": "ohm"}}
+    }
+
+
 def test_canonical_report_omits_empty_compatibility_metadata() -> None:
     timestamp = datetime.now(UTC).isoformat()
     report = RunReport(

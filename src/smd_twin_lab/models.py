@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -63,7 +64,7 @@ class MessageRef:
             json.dumps(self.parameters, allow_nan=False)
         except (TypeError, ValueError) as error:
             raise TypeError("message parameters must be JSON-safe") from error
-        object.__setattr__(self, "parameters", dict(self.parameters))
+        object.__setattr__(self, "parameters", deepcopy(dict(self.parameters)))
 
 
 @dataclass(frozen=True, slots=True)

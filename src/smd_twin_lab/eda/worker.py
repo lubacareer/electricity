@@ -627,12 +627,6 @@ class EdaWorkerClient:
                 try:
                     item = self._messages.get(timeout=min(0.05, remaining))
                 except queue.Empty:
-                    if process.poll() is not None:
-                        detail = self._crash_detail(process)
-                        self._stop_process()
-                        raise WorkerCrashedError(
-                            f"EDA worker exited before responding{detail}"
-                        ) from None
                     continue
                 if isinstance(item, _ReaderFailure):
                     detail = self._crash_detail(process)

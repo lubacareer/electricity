@@ -22,6 +22,7 @@ from smd_twin_lab.eda.model import (
     BoardPad,
     BoardSide,
     BoardTrack,
+    BoardVia,
     CopperLayer,
     EdaProjectDocument,
     PointNm,
@@ -98,6 +99,38 @@ def test_generated_files_use_owned_identity_and_canonical_coordinates(tmp_path: 
         "footprint_link_issues": "ignore",
         "lib_symbol_issues": "ignore",
     }
+
+
+def test_render_board_assigns_net_zero_to_unassigned_copper() -> None:
+    document = _document()
+    document = replace(
+        document,
+        board=replace(
+            document.board,
+            tracks=(
+                BoardTrack(
+                    "unassigned-track",
+                    "",
+                    PointNm(mm(5), mm(5)),
+                    PointNm(mm(10), mm(5)),
+                    mm(0.25),
+                ),
+            ),
+            vias=(
+                BoardVia(
+                    "unassigned-via",
+                    "",
+                    PointNm(mm(10), mm(10)),
+                    mm(0.8),
+                    mm(0.4),
+                ),
+            ),
+        ),
+    )
+
+    board = render_board(document)
+
+    assert board.count("\n\t\t(net 0)") == 2
 
 
 def test_kicad_report_counter_includes_sheet_erc_and_parity() -> None:
