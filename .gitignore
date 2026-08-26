@@ -13,4 +13,9 @@ dist/
 run-reports/
 *.sqlite3
 *.kicad_prl
+~*.kicad_*.lck
 .check-*
+/Spice64/
+/ngspice-*_64.7z
+/rust/target/
+/target/

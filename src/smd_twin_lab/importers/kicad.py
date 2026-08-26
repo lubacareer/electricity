@@ -32,6 +32,7 @@ from smd_twin_lab.models import (
     Diagnostic,
     DiagnosticSeverity,
     ImportedProject,
+    MessageRef,
     Net,
     ProjectCapabilities,
 )
@@ -157,6 +158,7 @@ class KiCadProjectImporter:
                     "KiCad CLI was not found. Install KiCad 10 or set SMD_TWIN_KICAD_CLI; "
                     "normalized project.json bundles can still be opened without KiCad.",
                     path=str(project_path),
+                    message_ref=MessageRef("diagnostic.kicad.cli_missing"),
                 )
             )
             return self._unavailable_source_project(
@@ -189,6 +191,10 @@ class KiCadProjectImporter:
                         "SOURCE_STAGING_FAILED",
                         f"KiCad inputs could not be copied to an isolated workspace: {exc}",
                         path=str(project_path.parent),
+                        message_ref=MessageRef(
+                            "diagnostic.kicad.source_staging_failed",
+                            {"detail": str(exc)},
+                        ),
                     )
                 )
                 return self._unavailable_source_project(
@@ -382,6 +388,7 @@ class KiCadProjectImporter:
                         "A KiCad source file changed while it was being imported. No cache was "
                         "written; close active edits or save the project, then retry.",
                         path=str(project_path),
+                        message_ref=MessageRef("diagnostic.kicad.source_changed"),
                     )
                 )
                 return self._changed_source_project(
@@ -444,10 +451,12 @@ class KiCadProjectImporter:
         unavailable_firmware = Capability(
             CapabilityStatus.UNAVAILABLE,
             "No firmware configuration is declared in twin.yaml.",
+            message_ref=MessageRef("capability.kicad.firmware_not_declared"),
         )
         unavailable_hardware = Capability(
             CapabilityStatus.UNAVAILABLE,
             "No physical hardware target is configured.",
+            message_ref=MessageRef("capability.kicad.hardware_not_configured"),
         )
         if path is None:
             return _ManifestInfo({}, True, (), unavailable_firmware, unavailable_hardware)
@@ -460,9 +469,17 @@ class KiCadProjectImporter:
                     "TWIN_MANIFEST_INVALID",
                     str(exc),
                     path=str(path),
+                    message_ref=MessageRef(
+                        "diagnostic.kicad.manifest_invalid",
+                        {"detail": str(exc)},
+                    ),
                 )
             )
-            invalid = Capability(CapabilityStatus.INVALID, "twin.yaml is invalid.")
+            invalid = Capability(
+                CapabilityStatus.INVALID,
+                "twin.yaml is invalid.",
+                message_ref=MessageRef("capability.kicad.manifest_invalid"),
+            )
             return _ManifestInfo({}, False, (), invalid, invalid)
         raw = manifest.raw
         valid = True
@@ -476,6 +493,7 @@ class KiCadProjectImporter:
                     "TWIN_SIMULATION_INVALID",
                     "The twin.yaml simulation entry must be a mapping.",
                     path=str(path),
+                    message_ref=MessageRef("diagnostic.kicad.simulation_not_mapping"),
                 )
             )
             valid = False
@@ -497,6 +515,10 @@ class KiCadProjectImporter:
                             "SPICE_MODEL_MISSING",
                             f"SPICE model {model_value!r} named by twin.yaml was not found.",
                             path=str(model_path),
+                            message_ref=MessageRef(
+                                "diagnostic.kicad.spice_model_missing",
+                                {"model": repr(model_value)},
+                            ),
                         )
                     )
 
@@ -506,7 +528,9 @@ class KiCadProjectImporter:
         elif not isinstance(firmware, dict):
             valid = False
             firmware_status = Capability(
-                CapabilityStatus.INVALID, "The twin.yaml firmware entry must be a mapping."
+                CapabilityStatus.INVALID,
+                "The twin.yaml firmware entry must be a mapping.",
+                message_ref=MessageRef("capability.kicad.firmware_not_mapping"),
             )
             diagnostics.append(
                 Diagnostic(
@@ -514,6 +538,7 @@ class KiCadProjectImporter:
                     "TWIN_FIRMWARE_INVALID",
                     firmware_status.detail,
                     path=str(path),
+                    message_ref=firmware_status.message_ref,
                 )
             )
         else:
@@ -533,6 +558,7 @@ class KiCadProjectImporter:
                 firmware_status = Capability(
                     CapabilityStatus.INVALID,
                     "The firmware image declared in twin.yaml is missing.",
+                    message_ref=MessageRef("capability.kicad.firmware_image_missing"),
                 )
                 diagnostics.append(
                     Diagnostic(
@@ -540,12 +566,14 @@ class KiCadProjectImporter:
                         "FIRMWARE_IMAGE_MISSING",
                         firmware_status.detail,
                         path=str(image_path),
+                        message_ref=firmware_status.message_ref,
                     )
                 )
             elif firmware:
                 firmware_status = Capability(
                     CapabilityStatus.AVAILABLE,
                     "Firmware configuration is declared in twin.yaml.",
+                    message_ref=MessageRef("capability.kicad.firmware_declared"),
                 )
             else:
                 firmware_status = unavailable_firmware
@@ -554,7 +582,9 @@ class KiCadProjectImporter:
         if hardware is not None and not isinstance(hardware, dict):
             valid = False
             hardware_status = Capability(
-                CapabilityStatus.INVALID, "The twin.yaml hardware entry must be a mapping."
+                CapabilityStatus.INVALID,
+                "The twin.yaml hardware entry must be a mapping.",
+                message_ref=MessageRef("capability.kicad.hardware_not_mapping"),
             )
             diagnostics.append(
                 Diagnostic(
@@ -562,12 +592,14 @@ class KiCadProjectImporter:
                     "TWIN_HARDWARE_INVALID",
                     hardware_status.detail,
                     path=str(path),
+                    message_ref=hardware_status.message_ref,
                 )
             )
         elif hardware:
             hardware_status = Capability(
                 CapabilityStatus.UNAVAILABLE,
                 "A hardware target is configured; connect and qualify it before use.",
+                message_ref=MessageRef("capability.kicad.hardware_requires_qualification"),
             )
         else:
             hardware_status = unavailable_hardware
@@ -598,6 +630,10 @@ class KiCadProjectImporter:
                     "KICAD_VERSION_UNAVAILABLE",
                     f"Could not query kicad-cli version: {exc}",
                     path=str(cli),
+                    message_ref=MessageRef(
+                        "diagnostic.kicad.version_query_failed",
+                        {"detail": str(exc)},
+                    ),
                 )
             )
             return None
@@ -608,6 +644,10 @@ class KiCadProjectImporter:
                     "KICAD_VERSION_UNAVAILABLE",
                     "kicad-cli version failed: " + _process_detail(process),
                     path=str(cli),
+                    message_ref=MessageRef(
+                        "diagnostic.kicad.version_command_failed",
+                        {"detail": _process_detail(process)},
+                    ),
                 )
             )
             return None
@@ -643,6 +683,10 @@ class KiCadProjectImporter:
                     "the project in KiCad.",
                     reference=label,
                     path=str(output),
+                    message_ref=MessageRef(
+                        "diagnostic.kicad.export_timeout",
+                        {"artifact": label},
+                    ),
                 )
             )
             return
@@ -654,6 +698,10 @@ class KiCadProjectImporter:
                     f"KiCad could not generate {label}: {exc}",
                     reference=label,
                     path=str(output),
+                    message_ref=MessageRef(
+                        "diagnostic.kicad.export_failed",
+                        {"artifact": label, "detail": str(exc)},
+                    ),
                 )
             )
             return
@@ -665,6 +713,10 @@ class KiCadProjectImporter:
                     f"KiCad could not generate {label}: {_process_detail(process)}",
                     reference=label,
                     path=str(output),
+                    message_ref=MessageRef(
+                        "diagnostic.kicad.export_failed",
+                        {"artifact": label, "detail": _process_detail(process)},
+                    ),
                 )
             )
             return
@@ -676,6 +728,10 @@ class KiCadProjectImporter:
                     f"KiCad reported success but did not create the {label} output.",
                     reference=label,
                     path=str(output),
+                    message_ref=MessageRef(
+                        "diagnostic.kicad.export_output_missing",
+                        {"artifact": label},
+                    ),
                 )
             )
             return
@@ -715,6 +771,10 @@ class KiCadProjectImporter:
                         f"The exported {label} is invalid: {exc}",
                         reference=label,
                         path=str(path),
+                        message_ref=MessageRef(
+                            "diagnostic.kicad.artifact_invalid",
+                            {"artifact": label, "detail": str(exc)},
+                        ),
                     )
                 )
 
@@ -745,6 +805,10 @@ class KiCadProjectImporter:
                         f"The exported SPICE netlist is invalid: {exc}",
                         reference="spice_netlist",
                         path=str(spice),
+                        message_ref=MessageRef(
+                            "diagnostic.kicad.spice_netlist_invalid",
+                            {"detail": str(exc)},
+                        ),
                     )
                 )
 
@@ -763,6 +827,10 @@ class KiCadProjectImporter:
                         f"The {label.upper()} JSON report could not be read: {exc}",
                         reference=label,
                         path=str(report),
+                        message_ref=MessageRef(
+                            "diagnostic.kicad.report_invalid",
+                            {"report": label.upper(), "detail": str(exc)},
+                        ),
                     )
                 )
 
@@ -832,38 +900,51 @@ class KiCadProjectImporter:
         visible_geometry = valid.intersection({"outline", "top_preview", "bottom_preview"})
         if sources.board is None:
             geometry_capability = Capability(
-                CapabilityStatus.UNAVAILABLE, "No sibling .kicad_pcb board file was found."
+                CapabilityStatus.UNAVAILABLE,
+                "No sibling .kicad_pcb board file was found.",
+                message_ref=MessageRef("capability.kicad.board_file_missing"),
             )
         elif visible_geometry:
+            component_count = len(normalized["components"])
             geometry_capability = Capability(
                 CapabilityStatus.AVAILABLE,
-                f"Board geometry imported with {len(normalized['components'])} "
-                "normalized components.",
+                f"Board geometry imported with {component_count} normalized components.",
+                message_ref=MessageRef(
+                    "capability.kicad.geometry_imported",
+                    {"count": component_count},
+                    count=component_count,
+                ),
             )
         else:
             geometry_capability = Capability(
                 CapabilityStatus.INVALID,
                 "The board exists, but KiCad produced no usable outline or SVG preview.",
+                message_ref=MessageRef("capability.kicad.geometry_unusable"),
             )
 
         if sources.schematic is None:
             circuit_capability = Capability(
-                CapabilityStatus.UNAVAILABLE, "No sibling .kicad_sch schematic file was found."
+                CapabilityStatus.UNAVAILABLE,
+                "No sibling .kicad_sch schematic file was found.",
+                message_ref=MessageRef("capability.kicad.schematic_file_missing"),
             )
         elif {"logical_netlist", "spice_netlist"}.issubset(valid):
             circuit_capability = Capability(
                 CapabilityStatus.AVAILABLE,
                 "Logical and SPICE netlists were exported; model coverage is checked at run time.",
+                message_ref=MessageRef("capability.kicad.netlists_exported"),
             )
         else:
             circuit_capability = Capability(
                 CapabilityStatus.INVALID,
                 "The schematic exists, but its logical or SPICE netlist export is unusable.",
+                message_ref=MessageRef("capability.kicad.netlists_unusable"),
             )
         if manifest_info.missing_models:
             circuit_capability = Capability(
                 CapabilityStatus.INVALID,
                 "One or more SPICE model files declared in twin.yaml are missing.",
+                message_ref=MessageRef("capability.kicad.spice_models_missing"),
             )
 
         return ImportedProject(
@@ -924,18 +1005,30 @@ class KiCadProjectImporter:
         manifest_info: _ManifestInfo,
         diagnostics: list[Diagnostic],
     ) -> ImportedProject:
-        geometry = Capability(
-            CapabilityStatus.UNAVAILABLE,
-            "KiCad CLI is required to normalize the board geometry."
-            if sources.board
-            else "No sibling .kicad_pcb board file was found.",
-        )
-        circuit = Capability(
-            CapabilityStatus.UNAVAILABLE,
-            "KiCad CLI is required to export circuit netlists."
-            if sources.schematic
-            else "No sibling .kicad_sch schematic file was found.",
-        )
+        if sources.board:
+            geometry = Capability(
+                CapabilityStatus.UNAVAILABLE,
+                "KiCad CLI is required to normalize the board geometry.",
+                message_ref=MessageRef("capability.kicad.cli_required_geometry"),
+            )
+        else:
+            geometry = Capability(
+                CapabilityStatus.UNAVAILABLE,
+                "No sibling .kicad_pcb board file was found.",
+                message_ref=MessageRef("capability.kicad.board_file_missing"),
+            )
+        if sources.schematic:
+            circuit = Capability(
+                CapabilityStatus.UNAVAILABLE,
+                "KiCad CLI is required to export circuit netlists.",
+                message_ref=MessageRef("capability.kicad.cli_required_circuit"),
+            )
+        else:
+            circuit = Capability(
+                CapabilityStatus.UNAVAILABLE,
+                "No sibling .kicad_sch schematic file was found.",
+                message_ref=MessageRef("capability.kicad.schematic_file_missing"),
+            )
         return ImportedProject(
             schema_version=1,
             project_id=project_id,
@@ -968,6 +1061,7 @@ class KiCadProjectImporter:
         invalid = Capability(
             CapabilityStatus.INVALID,
             "Source files changed during import; retry to obtain a consistent snapshot.",
+            message_ref=MessageRef("capability.kicad.source_changed"),
         )
         return ImportedProject(
             schema_version=1,
@@ -1026,6 +1120,10 @@ def _discover_sibling(
                 f"{kind.upper()}_FALLBACK_DISCOVERY",
                 f"Using the only {suffix} file in the project folder: {candidates[0].name}.",
                 path=str(candidates[0]),
+                message_ref=MessageRef(
+                    "diagnostic.kicad.sibling_fallback",
+                    {"suffix": suffix, "filename": candidates[0].name},
+                ),
             )
         )
         return candidates[0]
@@ -1037,6 +1135,15 @@ def _discover_sibling(
                 f"No {project.stem}{suffix} exists and multiple {suffix} files were found; "
                 f"rename/select a project with an unambiguous sibling {kind}.",
                 path=str(project.parent),
+                message_ref=MessageRef(
+                    "diagnostic.kicad.sibling_ambiguous",
+                    {
+                        "expected_name": f"{project.stem}{suffix}",
+                        "suffix": suffix,
+                        "kind": kind,
+                    },
+                    count=len(candidates),
+                ),
             )
         )
     else:
@@ -1046,6 +1153,10 @@ def _discover_sibling(
                 f"{kind.upper()}_MISSING",
                 f"No sibling {suffix} {kind} was found; its capabilities will be unavailable.",
                 path=str(project.parent),
+                message_ref=MessageRef(
+                    "diagnostic.kicad.sibling_missing",
+                    {"suffix": suffix, "kind": kind},
+                ),
             )
         )
     return None
@@ -1190,6 +1301,10 @@ def _merge_components(
                         "BOM_ONLY_COMPONENT",
                         f"{reference} is in the schematic BOM but not in PCB placement output.",
                         reference=reference,
+                        message_ref=MessageRef(
+                            "diagnostic.kicad.bom_only_component",
+                            {"reference": reference},
+                        ),
                     )
                 )
             elif placement is not None and bom_part is None:
@@ -1199,6 +1314,10 @@ def _merge_components(
                         "BOARD_ONLY_COMPONENT",
                         f"{reference} is in PCB placement output but not in the schematic BOM.",
                         reference=reference,
+                        message_ref=MessageRef(
+                            "diagnostic.kicad.board_only_component",
+                            {"reference": reference},
+                        ),
                     )
                 )
 

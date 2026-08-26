@@ -1,0 +1,12 @@
+[package]
+name = "smd-twin-eda-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "MIT"
+description = "Isolated geometry and connectivity worker for SMD Twin Lab"
+publish = false
+
+[dependencies]
+rmp-serde = "=1.3.1"
+serde_json = "=1.0.145"

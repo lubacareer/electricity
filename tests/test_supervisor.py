@@ -97,6 +97,13 @@ def test_thermistor_open_enters_fail_safe_and_explains_exact_fault(tmp_path: Pat
     assert "RT1 is open" in explanation
     assert "ADC_SENSE" in explanation
     assert "SENSOR_FAULT" in explanation
+    assert len(report.explanation_refs) == len(report.explanations)
+    open_ref = next(
+        item
+        for item in report.explanation_refs
+        if item.message_id == "explanation.supervisor.component_open"
+    )
+    assert open_ref.parameters["reference"] == "RT1"
 
 
 def test_supervisor_runs_are_reproducible_with_injected_identity_and_clock(
@@ -168,6 +175,9 @@ def test_circuit_failure_is_reported_as_infrastructure_error(tmp_path: Path) -> 
     assert report.infrastructure_error
     assert report.firmware_state is FirmwareState.SENSOR_FAULT
     assert report.diagnostics[0].code == "test.failure"
+    assert report.explanation_refs[0].message_id == (
+        "explanation.supervisor.circuit_failed_before_firmware"
+    )
 
 
 def test_report_can_be_saved_as_json(tmp_path: Path) -> None:

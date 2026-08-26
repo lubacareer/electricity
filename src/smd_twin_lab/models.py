@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -42,18 +43,44 @@ class FirmwareState(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class MessageRef:
+    """Stable reference to localizable first-party prose.
+
+    The English fallback remains next to the call site. Parameters are kept in
+    the model so the same message can be rendered later for reports or history.
+    """
+
+    message_id: str
+    parameters: dict[str, Any] = field(default_factory=dict)
+    count: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.message_id.strip():
+            raise ValueError("message_id must not be empty")
+        if not all(isinstance(key, str) for key in self.parameters):
+            raise TypeError("message parameters must use string keys")
+        try:
+            json.dumps(self.parameters, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise TypeError("message parameters must be JSON-safe") from error
+        object.__setattr__(self, "parameters", dict(self.parameters))
+
+
+@dataclass(frozen=True, slots=True)
 class Diagnostic:
     severity: DiagnosticSeverity
     code: str
     message: str
     reference: str | None = None
     path: str | None = None
+    message_ref: MessageRef | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Capability:
     status: CapabilityStatus
     detail: str
+    message_ref: MessageRef | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +216,7 @@ class Scenario:
     temperature_c: float
     fault: FaultSpec
     acknowledge: bool = False
+    language: str = "en"
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,9 +236,16 @@ class RunReport:
     timeline: tuple[dict[str, Any], ...]
     explanations: tuple[str, ...]
     diagnostics: tuple[Diagnostic, ...] = ()
+    explanation_refs: tuple[MessageRef, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if not self.explanation_refs:
+            payload.pop("explanation_refs")
+        for diagnostic in payload["diagnostics"]:
+            if diagnostic.get("message_ref") is None:
+                diagnostic.pop("message_ref")
+        return payload
 
     def write_json(self, path: Path) -> None:
         import json

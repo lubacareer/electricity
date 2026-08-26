@@ -127,6 +127,11 @@ def test_kicad_import_exports_normalizes_and_preserves_sources(tmp_path: Path) -
     assert project.capabilities.geometry.status == CapabilityStatus.AVAILABLE
     assert project.capabilities.circuit.status == CapabilityStatus.AVAILABLE
     assert project.capabilities.firmware.status == CapabilityStatus.UNAVAILABLE
+    assert project.capabilities.geometry.message_ref is not None
+    assert project.capabilities.geometry.message_ref.message_id == (
+        "capability.kicad.geometry_imported"
+    )
+    assert project.capabilities.geometry.message_ref.count == 3
     assert [component.reference for component in project.components] == ["C1", "R1", "U1"]
 
     resistor = next(component for component in project.components if component.reference == "R1")
@@ -185,6 +190,8 @@ def test_kicad_import_exports_normalizes_and_preserves_sources(tmp_path: Path) -
     ).import_project(project_file, variant="prototype A")
     assert cached.components == project.components
     assert cached.source_hashes == project.source_hashes
+    assert cached.capabilities == project.capabilities
+    assert cached.diagnostics == project.diagnostics
 
 
 def test_direct_bundle_load_does_not_discover_or_run_kicad(tmp_path: Path) -> None:
@@ -266,6 +273,8 @@ def test_failed_spice_export_is_diagnostic_and_keeps_geometry(tmp_path: Path) ->
         if diagnostic.code == "KICAD_EXPORT_FAILED" and diagnostic.reference == "spice_netlist"
     )
     assert "missing model" in failure.message
+    assert failure.message_ref is not None
+    assert failure.message_ref.parameters["artifact"] == "spice_netlist"
     assert project.spice_netlist_path is None
 
 
@@ -311,6 +320,8 @@ def test_malformed_bundle_returns_actionable_invalid_project(tmp_path: Path) -> 
     assert project.capabilities.geometry.status == CapabilityStatus.INVALID
     assert project.diagnostics[0].code == "BUNDLE_JSON_INVALID"
     assert "could not be read" in project.diagnostics[0].message
+    assert project.diagnostics[0].message_ref is not None
+    assert project.diagnostics[0].message_ref.message_id == "diagnostic.bundle.json_invalid"
 
 
 def test_importer_uses_strict_manifest_validation(tmp_path: Path) -> None:

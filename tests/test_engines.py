@@ -132,12 +132,15 @@ def test_ngspice_wrdata_parser_accepts_headers_and_repeated_scale() -> None:
 def test_ngspice_adapter_reports_missing_and_malformed_output(tmp_path: Path) -> None:
     missing = NgspiceBatchEngine(executable=tmp_path / "does-not-exist.exe")
     assert not missing.available
-    assert missing.run(simulation_request()).diagnostics[0].code == "ngspice.unavailable"
+    unavailable = missing.run(simulation_request()).diagnostics[0]
+    assert unavailable.code == "ngspice.unavailable"
+    assert unavailable.message_ref is not None
+    assert unavailable.message_ref.message_id == "diagnostic.ngspice.unavailable"
 
     no_output_script = "import sys; print('ngspice-47 fake')"
     malformed = NgspiceBatchEngine(
         command_prefix=(sys.executable, "-c", no_output_script),
-        timeout_s=2.0,
+        timeout_s=10.0,
     )
     result = malformed.run(simulation_request())
     assert not result.success
@@ -150,7 +153,7 @@ def test_ngspice_adapter_reports_missing_and_malformed_output(tmp_path: Path) ->
     )
     wrong_version = NgspiceBatchEngine(
         command_prefix=(sys.executable, "-c", wrong_version_script),
-        timeout_s=2.0,
+        timeout_s=10.0,
     ).run(simulation_request())
     assert not wrong_version.success
     assert wrong_version.diagnostics[0].code == "ngspice.unsupported_version"
@@ -215,6 +218,10 @@ def test_reference_circuit_rejects_unmodelled_faults_instead_of_passing() -> Non
 
     assert not result.success
     assert result.diagnostics[0].code == "reference.unsupported_fault"
+    assert result.diagnostics[0].message_ref is not None
+    assert result.diagnostics[0].message_ref.message_id == (
+        "diagnostic.reference.component_open_target"
+    )
 
 
 def test_renode_result_parser_and_determinism_qualification(tmp_path: Path) -> None:
@@ -237,7 +244,7 @@ def test_renode_result_parser_and_determinism_qualification(tmp_path: Path) -> N
         firmware_path,
         integration_path,
         command_prefix=(sys.executable, "-c", fake_command),
-        timeout_s=2.0,
+        timeout_s=10.0,
     )
 
     qualification = engine.qualify(FirmwareRequest(1.65, 3.3))

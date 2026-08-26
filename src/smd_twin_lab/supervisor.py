@@ -16,6 +16,7 @@ from .models import (
     FirmwareRequest,
     FirmwareState,
     ImportedProject,
+    MessageRef,
     RunReport,
     Scenario,
     SimulationRequest,
@@ -58,59 +59,96 @@ def _explanations(
     scenario: Scenario,
     state: FirmwareState,
     measurements: dict[str, float],
-) -> tuple[str, ...]:
-    lines = [
-        (
-            "A 10 kOhm resistor is above the ADC node and the 10 kOhm NTC is below it. "
-            "At 25 C their equal resistance produces about half of the 3.3 V supply."
-        )
-    ]
+) -> tuple[tuple[str, ...], tuple[MessageRef, ...]]:
+    entries: list[tuple[str, MessageRef]] = []
+
+    def add(message_id: str, fallback: str, **parameters: object) -> None:
+        entries.append((fallback, MessageRef(message_id, parameters)))
+
+    add(
+        "explanation.supervisor.divider_baseline",
+        "A 10 kOhm resistor is above the ADC node and the 10 kOhm NTC is below it. "
+        "At 25 C their equal resistance produces about half of the 3.3 V supply.",
+    )
     fault = scenario.fault
     if fault.kind is FaultKind.COMPONENT_OPEN:
         reference = fault.reference or "RT1"
-        lines.append(
+        add(
+            "explanation.supervisor.component_open",
             f"{reference} is open. A finite 1 TOhm model replaces the broken path, so ADC_SENSE "
-            "is pulled close to 3.3 V instead of hiding the numerical topology from SPICE."
+            "is pulled close to 3.3 V instead of hiding the numerical topology from SPICE.",
+            reference=reference,
         )
     elif fault.kind is FaultKind.NET_SHORT:
-        lines.append(
-            f"A finite 1 mOhm bridge connects {fault.net_a or 'one net'} to "
-            f"{fault.net_b or 'the other net'}, forcing the ADC node toward a rail."
+        net_a = fault.net_a or "one net"
+        net_b = fault.net_b or "the other net"
+        add(
+            "explanation.supervisor.net_short",
+            f"A finite 1 mOhm bridge connects {net_a} to {net_b}, forcing the ADC node toward a "
+            "rail.",
+            net_a=net_a,
+            net_b=net_b,
         )
     elif fault.kind is FaultKind.WRONG_VALUE:
-        lines.append(
-            f"The selected part is substituted with {fault.value:g} Ohm; the KiCad source remains "
-            "unchanged."
-            if fault.value is not None
-            else "The requested wrong-value fault did not specify a resistance."
-        )
+        if fault.value is not None:
+            value = f"{fault.value:g}"
+            add(
+                "explanation.supervisor.wrong_value",
+                f"The selected part is substituted with {value} Ohm; the KiCad source remains "
+                "unchanged.",
+                value=value,
+            )
+        else:
+            add(
+                "explanation.supervisor.wrong_value_missing",
+                "The requested wrong-value fault did not specify a resistance.",
+            )
     elif fault.kind is FaultKind.INTERMITTENT:
-        lines.append(
+        add(
+            "explanation.supervisor.intermittent",
             "A controlled switch opens only during the selected interval, exposing a fault that "
-            "a single static measurement could miss."
+            "a single static measurement could miss.",
         )
 
     adc = measurements.get("adc_voltage_v", measurements.get("sensor_voltage_v"))
     if state is FirmwareState.SENSOR_FAULT:
-        lines.append(
-            f"The ADC reading{f' ({adc:.6g} V)' if adc is not None else ''} is outside the "
-            "valid sensor range. Firmware enters SENSOR_FAULT and keeps the red LED and buzzer on; "
-            "acknowledge cannot silence this fail-safe state."
-        )
+        if adc is None:
+            add(
+                "explanation.supervisor.sensor_fault_without_adc",
+                "The ADC reading is outside the valid sensor range. Firmware enters SENSOR_FAULT "
+                "and keeps the red LED and buzzer on; acknowledge cannot silence this fail-safe "
+                "state.",
+            )
+        else:
+            adc_value = f"{adc:.6g}"
+            add(
+                "explanation.supervisor.sensor_fault_with_adc",
+                f"The ADC reading ({adc_value} V) is outside the valid sensor range. Firmware "
+                "enters SENSOR_FAULT and keeps the red LED and buzzer on; acknowledge cannot "
+                "silence this fail-safe state.",
+                adc_voltage=adc_value,
+            )
     elif state is FirmwareState.ALARM:
-        lines.append(
+        add(
+            "explanation.supervisor.alarm_threshold",
             "The inferred temperature reached the 35 C alarm threshold. The alarm clears only "
-            "below 33 C, preventing chatter near the threshold."
+            "below 33 C, preventing chatter near the threshold.",
         )
     else:
-        lines.append(
-            "The sensor is valid and below the 35 C alarm threshold, so the green status LED is on."
+        add(
+            "explanation.supervisor.normal_state",
+            "The sensor is valid and below the 35 C alarm threshold, so the green status LED is "
+            "on.",
         )
-    lines.append(
+    add(
+        "explanation.supervisor.educational_disclaimer",
         "This simulation is an educational diagnostic result, not proof of solder quality, safety, "
-        "or product compliance."
+        "or product compliance.",
     )
-    return tuple(lines)
+    return (
+        tuple(fallback for fallback, _ in entries),
+        tuple(message_ref for _, message_ref in entries),
+    )
 
 
 class QuasiStaticSupervisor:
@@ -179,6 +217,7 @@ class QuasiStaticSupervisor:
                         severity=DiagnosticSeverity.ERROR,
                         code="supervisor.missing_adc",
                         message="Circuit engine succeeded without an ADC voltage measurement.",
+                        message_ref=MessageRef("diagnostic.supervisor.missing_adc"),
                     )
                 )
             completed_at = _iso_timestamp(self.clock)
@@ -198,6 +237,9 @@ class QuasiStaticSupervisor:
                 timeline=tuple(timeline),
                 explanations=("The circuit simulation failed before firmware could be evaluated.",),
                 diagnostics=tuple(diagnostics),
+                explanation_refs=(
+                    MessageRef("explanation.supervisor.circuit_failed_before_firmware"),
+                ),
             )
 
         firmware = self.firmware_engine.load_and_step(
@@ -243,10 +285,24 @@ class QuasiStaticSupervisor:
                         f"Expected {expected_state.value} with {expected_outputs}, observed "
                         f"{firmware.state.value} with {firmware.outputs}."
                     ),
+                    message_ref=MessageRef(
+                        "diagnostic.supervisor.functional_mismatch",
+                        {
+                            "expected_state": expected_state.value,
+                            "expected_outputs": str(expected_outputs),
+                            "observed_state": firmware.state.value,
+                            "observed_outputs": str(firmware.outputs),
+                        },
+                    ),
                 )
             )
 
         completed_at = _iso_timestamp(self.clock)
+        explanations, explanation_refs = _explanations(
+            scenario,
+            firmware.state,
+            circuit.measurements,
+        )
         return RunReport(
             schema_version=1,
             run_id=run_id,
@@ -261,6 +317,7 @@ class QuasiStaticSupervisor:
             measurements=circuit.measurements,
             signals=circuit.signals,
             timeline=tuple(timeline),
-            explanations=_explanations(scenario, firmware.state, circuit.measurements),
+            explanations=explanations,
             diagnostics=tuple(diagnostics),
+            explanation_refs=explanation_refs,
         )

@@ -14,6 +14,7 @@ from ..models import (
     Diagnostic,
     DiagnosticSeverity,
     FaultKind,
+    MessageRef,
     SignalSeries,
     SimulationRequest,
     SimulationResult,
@@ -221,6 +222,7 @@ class NgspiceBatchEngine:
             return self._failure(
                 "ngspice was not found. Install standalone ngspice 47 or set SMD_TWIN_NGSPICE.",
                 "ngspice.unavailable",
+                message_ref=MessageRef("diagnostic.ngspice.unavailable"),
             )
 
         diagnostics: list[Diagnostic] = []
@@ -234,6 +236,7 @@ class NgspiceBatchEngine:
                         "was not modified or executed."
                     ),
                     path=request.netlist_path,
+                    message_ref=MessageRef("diagnostic.ngspice.reference_model_used"),
                 )
             )
 
@@ -255,6 +258,7 @@ class NgspiceBatchEngine:
                     return self._failure(
                         "ngspice simulation was cancelled.",
                         "ngspice.cancelled",
+                        message_ref=MessageRef("diagnostic.ngspice.cancelled"),
                         stdout=process.stdout,
                         stderr=process.stderr,
                     )
@@ -262,6 +266,10 @@ class NgspiceBatchEngine:
                     return self._failure(
                         f"ngspice exceeded the {self.timeout_s:g} second timeout.",
                         "ngspice.timeout",
+                        message_ref=MessageRef(
+                            "diagnostic.ngspice.timeout",
+                            {"timeout": f"{self.timeout_s:g}"},
+                        ),
                         stdout=process.stdout,
                         stderr=process.stderr,
                     )
@@ -269,6 +277,10 @@ class NgspiceBatchEngine:
                     return self._failure(
                         f"ngspice exited with status {process.returncode}.",
                         "ngspice.failed",
+                        message_ref=MessageRef(
+                            "diagnostic.ngspice.failed",
+                            {"status": process.returncode},
+                        ),
                         stdout=process.stdout,
                         stderr=process.stderr,
                     )
@@ -276,12 +288,20 @@ class NgspiceBatchEngine:
                     return self._failure(
                         "ngspice did not create the expected waveform file.",
                         "ngspice.missing_output",
+                        message_ref=MessageRef("diagnostic.ngspice.missing_output"),
                         stdout=process.stdout,
                         stderr=process.stderr,
                     )
                 x_values, y_values = parse_wrdata(output_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            return self._failure(str(exc), "ngspice.invalid_output")
+            return self._failure(
+                str(exc),
+                "ngspice.invalid_output",
+                message_ref=MessageRef(
+                    "diagnostic.ngspice.invalid_output",
+                    {"detail": str(exc)},
+                ),
+            )
 
         resistance = ntc_resistance_ohm(request.temperature_c)
         if request.fault.kind is FaultKind.COMPONENT_OPEN and _fault_targets_thermistor(
@@ -314,6 +334,10 @@ class NgspiceBatchEngine:
             return self._failure(
                 f"Expected the pinned ngspice 47 runtime, but detected {version}.",
                 "ngspice.unsupported_version",
+                message_ref=MessageRef(
+                    "diagnostic.ngspice.unsupported_version",
+                    {"version": version},
+                ),
                 stdout=process.stdout,
                 stderr=process.stderr,
             )
@@ -333,6 +357,7 @@ class NgspiceBatchEngine:
         message: str,
         code: str,
         *,
+        message_ref: MessageRef | None = None,
         stdout: str = "",
         stderr: str = "",
     ) -> SimulationResult:
@@ -349,6 +374,7 @@ class NgspiceBatchEngine:
                     severity=DiagnosticSeverity.ERROR,
                     code=code,
                     message=message,
+                    message_ref=message_ref,
                 ),
             ),
         )

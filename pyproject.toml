@@ -16,6 +16,7 @@ dependencies = [
   "pyqtgraph>=0.13.7,<1",
   "PyYAML>=6.0.2,<7",
   "platformdirs>=4.3,<5",
+  "msgpack==1.2.1",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +41,7 @@ smd_twin_lab = [
   "resources/**/*.svg",
   "resources/**/*.cir",
   "resources/**/*.md",
+  "resources/**/*.qm",
 ]
 
 [tool.pytest.ini_options]

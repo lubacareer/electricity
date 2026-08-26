@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from ..localization import LanguageManager, current_language_manager
 from ..models import Component, ComponentSide, ImportedProject
 
 try:
@@ -22,11 +23,20 @@ class BoardView(QtWidgets.QGraphicsView):
 
     component_selected = QtCore.Signal(str)
 
-    def __init__(self, side: ComponentSide, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self,
+        side: ComponentSide,
+        parent: QtWidgets.QWidget | None = None,
+        *,
+        language_manager: LanguageManager | None = None,
+    ) -> None:
         super().__init__(parent)
         self.side = side
+        self.language_manager = language_manager or current_language_manager()
         self._project: ImportedProject | None = None
         self._component_items: dict[str, QtWidgets.QGraphicsRectItem] = {}
+        self._components: dict[str, Component] = {}
+        self._empty_text_item: QtWidgets.QGraphicsTextItem | None = None
         self.setScene(QtWidgets.QGraphicsScene(self))
         self.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         self.setDragMode(QtWidgets.QGraphicsView.DragMode.ScrollHandDrag)
@@ -39,6 +49,8 @@ class BoardView(QtWidgets.QGraphicsView):
         self._project = project
         self.scene().clear()
         self._component_items.clear()
+        self._components.clear()
+        self._empty_text_item = None
         if project is None:
             self._draw_empty_state()
             return
@@ -123,11 +135,12 @@ class BoardView(QtWidgets.QGraphicsView):
         if self.side is ComponentSide.BACK:
             rotation = component.rotation_deg
         item.setRotation(rotation)
-        item.setToolTip(_component_tooltip(component))
+        item.setToolTip(_component_tooltip(component, self.language_manager))
         item.setData(_REFERENCE_ROLE, component.reference)
         item.setFlag(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         item.setZValue(2.0)
         self._component_items[component.reference] = item
+        self._components[component.reference] = component
 
         label = QtWidgets.QGraphicsSimpleTextItem(component.reference, item)
         label.setBrush(QtGui.QBrush(QtGui.QColor("white")))
@@ -167,9 +180,32 @@ class BoardView(QtWidgets.QGraphicsView):
         self.scene().addItem(svg_item)
 
     def _draw_empty_state(self) -> None:
-        text = self.scene().addText("Open a project to inspect board placement")
+        text = self.scene().addText("")
         text.setDefaultTextColor(QtGui.QColor("#aebdce"))
+        self._empty_text_item = text
+        self.retranslate_ui()
         self.scene().setSceneRect(text.boundingRect().adjusted(-20, -20, 20, 20))
+
+    def retranslate_ui(self) -> None:
+        if self._empty_text_item is not None:
+            self._empty_text_item.setPlainText(
+                self.language_manager.text(
+                    "board.empty",
+                    "Open a project to inspect board placement",
+                )
+            )
+            self.scene().setSceneRect(
+                self._empty_text_item.boundingRect().adjusted(-20, -20, 20, 20)
+            )
+        for reference, item in self._component_items.items():
+            component = self._components.get(reference)
+            if component is not None:
+                item.setToolTip(_component_tooltip(component, self.language_manager))
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:  # noqa: N802 - Qt API
+        super().changeEvent(event)
+        if event.type() == QtCore.QEvent.Type.LanguageChange:
+            self.retranslate_ui()
 
     @QtCore.Slot()
     def _emit_selection(self) -> None:
@@ -185,31 +221,37 @@ class BoardCanvas(QtWidgets.QWidget):
 
     component_selected = QtCore.Signal(str)
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None = None,
+        *,
+        language_manager: LanguageManager | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.language_manager = language_manager or current_language_manager()
         self.setMinimumHeight(250)
         self.tabs = QtWidgets.QTabWidget()
-        self.top_view = BoardView(ComponentSide.FRONT)
-        self.bottom_view = BoardView(ComponentSide.BACK)
-        self.tabs.addTab(self.top_view, "Top")
-        self.tabs.addTab(self.bottom_view, "Bottom (mirrored)")
+        self.top_view = BoardView(ComponentSide.FRONT, language_manager=self.language_manager)
+        self.bottom_view = BoardView(ComponentSide.BACK, language_manager=self.language_manager)
+        self.tabs.addTab(self.top_view, "")
+        self.tabs.addTab(self.bottom_view, "")
         self.top_view.component_selected.connect(self.component_selected)
         self.bottom_view.component_selected.connect(self.component_selected)
 
-        fit_button = QtWidgets.QPushButton("Fit board")
-        fit_button.setToolTip("Reset zoom to show the complete board")
-        fit_button.clicked.connect(self._fit_current)
-        hint = QtWidgets.QLabel("Wheel: zoom  •  Drag: pan  •  Click: inspect")
-        hint.setStyleSheet("color: #728195")
+        self.fit_button = QtWidgets.QPushButton()
+        self.fit_button.clicked.connect(self._fit_current)
+        self.hint = QtWidgets.QLabel()
+        self.hint.setStyleSheet("color: #526273")
         controls = QtWidgets.QHBoxLayout()
-        controls.addWidget(hint)
+        controls.addWidget(self.hint)
         controls.addStretch(1)
-        controls.addWidget(fit_button)
+        controls.addWidget(self.fit_button)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(controls)
         layout.addWidget(self.tabs, 1)
+        self.retranslate_ui()
 
     def set_project(self, project: ImportedProject | None) -> None:
         self.top_view.set_project(project)
@@ -218,6 +260,33 @@ class BoardCanvas(QtWidgets.QWidget):
     def select_reference(self, reference: str) -> None:
         self.top_view.select_reference(reference)
         self.bottom_view.select_reference(reference)
+
+    def retranslate_ui(self) -> None:
+        self.tabs.setTabText(0, self.language_manager.text("board.side.top", "Top"))
+        self.tabs.setTabText(
+            1,
+            self.language_manager.text("board.side.bottom", "Bottom (mirrored)"),
+        )
+        self.fit_button.setText(self.language_manager.text("board.fit", "Fit board"))
+        self.fit_button.setToolTip(
+            self.language_manager.text(
+                "board.fit.tooltip",
+                "Reset zoom to show the complete board",
+            )
+        )
+        self.hint.setText(
+            self.language_manager.text(
+                "board.navigation_hint",
+                "Wheel: zoom  •  Drag: pan  •  Click: inspect",
+            )
+        )
+        self.top_view.retranslate_ui()
+        self.bottom_view.retranslate_ui()
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:  # noqa: N802 - Qt API
+        super().changeEvent(event)
+        if event.type() == QtCore.QEvent.Type.LanguageChange:
+            self.retranslate_ui()
 
     @QtCore.Slot()
     def _fit_current(self) -> None:
@@ -237,10 +306,29 @@ def _component_size(component: Component) -> tuple[float, float]:
     return (6.0, 4.0)
 
 
-def _component_tooltip(component: Component) -> str:
-    nets = ", ".join(component.nets) or "No net data"
-    return (
-        f"{component.reference}  {component.value}\n"
-        f"{component.footprint or 'Unknown footprint'}\n"
-        f"Side: {component.side.value}  •  Nets: {nets}"
+def _component_tooltip(component: Component, language_manager: LanguageManager) -> str:
+    nets = ", ".join(component.nets) or language_manager.text(
+        "board.component.no_net_data", "No net data"
+    )
+    footprint = component.footprint or language_manager.text(
+        "board.component.unknown_footprint", "Unknown footprint"
+    )
+    side = language_manager.text(
+        f"component.side.{component.side.value}",
+        {
+            ComponentSide.FRONT: "Front",
+            ComponentSide.BACK: "Back",
+            ComponentSide.UNKNOWN: "Unknown",
+        }[component.side],
+    )
+    return language_manager.text(
+        "board.component.tooltip",
+        "{reference}  {value}\n{footprint}\nSide: {side}  •  Nets: {nets}",
+        parameters={
+            "reference": component.reference,
+            "value": component.value,
+            "footprint": footprint,
+            "side": side,
+            "nets": nets,
+        },
     )

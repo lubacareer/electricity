@@ -53,7 +53,7 @@ class RuntimeServices:
         if not available:
             raise ValueError(detail)
         report = self.supervisor.run(project, scenario)
-        self.history.save(report)
+        self.history.save(report, language=scenario.language)
         return report
 
 

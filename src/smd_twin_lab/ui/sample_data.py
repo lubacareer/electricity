@@ -15,6 +15,7 @@ from ..models import (
     FaultKind,
     FirmwareState,
     ImportedProject,
+    MessageRef,
     Net,
     PinRef,
     ProjectCapabilities,
@@ -131,18 +132,25 @@ def build_sample_project() -> ImportedProject:
         nets=nets,
         geometry=BoardGeometry(min_x_mm=0.0, min_y_mm=0.0, max_x_mm=76.0, max_y_mm=50.0),
         capabilities=ProjectCapabilities(
-            geometry=Capability(CapabilityStatus.AVAILABLE, "Interactive sample placement data"),
+            geometry=Capability(
+                CapabilityStatus.AVAILABLE,
+                "Interactive sample placement data",
+                message_ref=MessageRef("capability.sample.geometry"),
+            ),
             circuit=Capability(
                 CapabilityStatus.UNAVAILABLE,
                 "Sample model active; connect ngspice for electrical simulation",
+                message_ref=MessageRef("capability.sample.circuit"),
             ),
             firmware=Capability(
                 CapabilityStatus.AVAILABLE,
                 "Deterministic reference state machine",
+                message_ref=MessageRef("capability.sample.firmware"),
             ),
             hardware=Capability(
                 CapabilityStatus.UNAVAILABLE,
                 "No fixture connected (hardware is optional)",
+                message_ref=MessageRef("capability.sample.hardware"),
             ),
         ),
     )
@@ -231,5 +239,9 @@ def run_sample_scenario(project: ImportedProject, scenario: Scenario) -> RunRepo
         explanations=(
             "The ADC input is valid when it remains between 0.5 V and 4.5 V.",
             "A real backend can replace this teaching model without changing the UI contract.",
+        ),
+        explanation_refs=(
+            MessageRef("explanation.sample.valid_adc_range"),
+            MessageRef("explanation.sample.replaceable_backend"),
         ),
     )

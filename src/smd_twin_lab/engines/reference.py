@@ -11,6 +11,7 @@ from ..models import (
     FirmwareRequest,
     FirmwareResult,
     FirmwareState,
+    MessageRef,
     SignalSeries,
     SimulationRequest,
     SimulationResult,
@@ -88,18 +89,36 @@ def _diagnostic(
     message: str,
     *,
     reference: str | None = None,
+    message_ref: MessageRef | None = None,
 ) -> Diagnostic:
-    return Diagnostic(severity=severity, code=code, message=message, reference=reference)
+    return Diagnostic(
+        severity=severity,
+        code=code,
+        message=message,
+        reference=reference,
+        message_ref=message_ref,
+    )
 
 
-def _failure(message: str, code: str = "reference.invalid_request") -> SimulationResult:
+def _failure(
+    message: str,
+    code: str = "reference.invalid_request",
+    message_ref: MessageRef | None = None,
+) -> SimulationResult:
     return SimulationResult(
         success=False,
         engine="reference-ntc",
         engine_version="1",
         measurements={},
         signals=(),
-        diagnostics=(_diagnostic(DiagnosticSeverity.ERROR, code, message),),
+        diagnostics=(
+            _diagnostic(
+                DiagnosticSeverity.ERROR,
+                code,
+                message,
+                message_ref=message_ref,
+            ),
+        ),
     )
 
 
@@ -144,16 +163,31 @@ class ReferenceNtcCircuitEngine:
 
     def run(self, request: SimulationRequest) -> SimulationResult:
         if request.duration_s <= 0:
-            return _failure("duration_s must be positive")
+            return _failure(
+                "duration_s must be positive",
+                message_ref=MessageRef("diagnostic.reference.duration_positive"),
+            )
         if request.sample_count < 2:
-            return _failure("sample_count must be at least 2")
+            return _failure(
+                "sample_count must be at least 2",
+                message_ref=MessageRef("diagnostic.reference.sample_count_minimum"),
+            )
         if not math.isfinite(request.temperature_c):
-            return _failure("temperature_c must be finite")
+            return _failure(
+                "temperature_c must be finite",
+                message_ref=MessageRef("diagnostic.reference.temperature_finite"),
+            )
 
         try:
             nominal_resistance = ntc_resistance_ohm(request.temperature_c)
         except (ValueError, OverflowError) as exc:
-            return _failure(str(exc))
+            return _failure(
+                str(exc),
+                message_ref=MessageRef(
+                    "diagnostic.reference.temperature_invalid",
+                    {"detail": str(exc)},
+                ),
+            )
 
         diagnostics: list[Diagnostic] = []
         fault = request.fault
@@ -165,17 +199,20 @@ class ReferenceNtcCircuitEngine:
                 return _failure(
                     "This release can inject component-open faults only into RT1.",
                     "reference.unsupported_fault",
+                    MessageRef("diagnostic.reference.component_open_target"),
                 )
         elif fault.kind is FaultKind.WRONG_VALUE:
             if not _fault_targets_thermistor(fault.reference):
                 return _failure(
                     "This release can substitute resistance values only for RT1.",
                     "reference.unsupported_fault",
+                    MessageRef("diagnostic.reference.wrong_value_target"),
                 )
             elif fault.value is None or not math.isfinite(fault.value) or fault.value <= 0:
                 return _failure(
                     "A wrong-value thermistor fault requires a positive resistance in ohms.",
                     "reference.invalid_fault_value",
+                    MessageRef("diagnostic.reference.wrong_value_positive"),
                 )
             else:
                 effective_resistance = fault.value
@@ -184,6 +221,7 @@ class ReferenceNtcCircuitEngine:
                 return _failure(
                     "This release models reversed polarity only for the non-polar RT1 sensor.",
                     "reference.unsupported_fault",
+                    MessageRef("diagnostic.reference.reversed_polarity_target"),
                 )
             diagnostics.append(
                 _diagnostic(
@@ -191,6 +229,7 @@ class ReferenceNtcCircuitEngine:
                     "reference.nonpolar_thermistor",
                     "Reversing this two-terminal NTC does not change its electrical behavior.",
                     reference=fault.reference,
+                    message_ref=MessageRef("diagnostic.reference.nonpolar_thermistor"),
                 )
             )
 
@@ -206,6 +245,7 @@ class ReferenceNtcCircuitEngine:
                 return _failure(
                     "Only ADC_SENSE-to-3V3 and ADC_SENSE-to-GND shorts are supported.",
                     "reference.unsupported_fault",
+                    MessageRef("diagnostic.reference.short_target"),
                 )
 
         x_values = tuple(
@@ -217,6 +257,7 @@ class ReferenceNtcCircuitEngine:
             return _failure(
                 "This release can inject intermittent opens only into RT1.",
                 "reference.unsupported_fault",
+                MessageRef("diagnostic.reference.intermittent_target"),
             )
 
         if fault.kind is FaultKind.INTERMITTENT:
@@ -228,6 +269,7 @@ class ReferenceNtcCircuitEngine:
                 return _failure(
                     "An intermittent fault requires a non-negative start and positive duration.",
                     "reference.invalid_intermittent_fault",
+                    MessageRef("diagnostic.reference.intermittent_range"),
                 )
             open_voltage = divider_voltage_v(OPEN_RESISTANCE_OHM)
             y_values = tuple(
@@ -306,6 +348,7 @@ class ReferenceFirmwareEngine:
                         DiagnosticSeverity.ERROR,
                         "firmware.invalid_input",
                         "Supply and ADC voltages must be finite, with a positive supply.",
+                        message_ref=MessageRef("diagnostic.firmware.invalid_input"),
                     ),
                 ),
             )

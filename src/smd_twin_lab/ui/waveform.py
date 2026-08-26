@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from ..localization import LanguageManager, current_language_manager
 from ..models import SignalSeries
 
 try:
@@ -15,8 +16,14 @@ except ImportError:  # pragma: no cover - dependency-free fallback
 
 
 class _PainterWaveform(QtWidgets.QWidget):
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None = None,
+        *,
+        language_manager: LanguageManager | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.language_manager = language_manager or current_language_manager()
         self._signals: tuple[SignalSeries, ...] = ()
         self.setMinimumHeight(180)
         self.setAutoFillBackground(True)
@@ -38,7 +45,10 @@ class _PainterWaveform(QtWidgets.QWidget):
             painter.drawText(
                 plot,
                 QtCore.Qt.AlignmentFlag.AlignCenter,
-                "Run a scenario to see signals",
+                self.language_manager.text(
+                    "waveform.empty",
+                    "Run a scenario to see signals",
+                ),
             )
             return
 
@@ -74,21 +84,26 @@ class _PainterWaveform(QtWidgets.QWidget):
 class WaveformView(QtWidgets.QWidget):
     """Small adapter that keeps pyqtgraph out of the rest of the UI."""
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None = None,
+        *,
+        language_manager: LanguageManager | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.language_manager = language_manager or current_language_manager()
         self._signals: tuple[SignalSeries, ...] = ()
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         if pg is None:
-            self._plot: object = _PainterWaveform()
+            self._plot: object = _PainterWaveform(language_manager=self.language_manager)
         else:
             plot = pg.PlotWidget(background="#101620")
             plot.showGrid(x=True, y=True, alpha=0.2)
-            plot.setLabel("bottom", "Simulation time", units="s")
-            plot.setLabel("left", "Signal value")
             plot.addLegend(offset=(8, 8))
             self._plot = plot
         layout.addWidget(self._plot)  # type: ignore[arg-type]
+        self.retranslate_ui()
 
     @property
     def signals(self) -> tuple[SignalSeries, ...]:
@@ -108,3 +123,22 @@ class WaveformView(QtWidgets.QWidget):
                 name=f"{signal.name} [{signal.unit}]",
                 pen=pg.mkPen(colors[index % len(colors)], width=2),
             )
+
+    def retranslate_ui(self) -> None:
+        if isinstance(self._plot, _PainterWaveform):
+            self._plot.update()
+            return
+        self._plot.setLabel(  # type: ignore[union-attr]
+            "bottom",
+            self.language_manager.text("waveform.axis.time", "Simulation time"),
+            units="s",
+        )
+        self._plot.setLabel(  # type: ignore[union-attr]
+            "left",
+            self.language_manager.text("waveform.axis.value", "Signal value"),
+        )
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:  # noqa: N802 - Qt API
+        super().changeEvent(event)
+        if event.type() == QtCore.QEvent.Type.LanguageChange:
+            self.retranslate_ui()

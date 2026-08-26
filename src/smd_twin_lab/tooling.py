@@ -26,6 +26,7 @@ def _first_existing(candidates: list[str | Path | None]) -> Path | None:
 
 
 def discover_tools() -> ToolPaths:
+    workspace_root = Path(__file__).resolve().parents[2]
     kicad_from_path = shutil.which("kicad-cli")
     spice_from_path = shutil.which("ngspice_con") or shutil.which("ngspice")
     renode_from_path = shutil.which("renode") or shutil.which("Renode")
@@ -41,6 +42,13 @@ def discover_tools() -> ToolPaths:
             kicad_from_path,
         ]
     )
-    ngspice = _first_existing([os.environ.get("SMD_TWIN_NGSPICE"), spice_from_path])
+    ngspice = _first_existing(
+        [
+            os.environ.get("SMD_TWIN_NGSPICE"),
+            workspace_root / "Spice64" / "bin" / "ngspice_con.exe",
+            workspace_root / ".tools" / "ngspice-47" / "bin" / "ngspice_con.exe",
+            spice_from_path,
+        ]
+    )
     renode = _first_existing([os.environ.get("SMD_TWIN_RENODE"), renode_from_path])
     return ToolPaths(kicad_cli=kicad, ngspice=ngspice, renode=renode)

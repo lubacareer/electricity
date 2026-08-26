@@ -6,11 +6,17 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from .models import RunReport
+from .models import MessageRef, RunReport
 
 SCHEMA_VERSION = 1
+
+
+class MessageRenderer(Protocol):
+    """Small rendering surface shared by the Qt and headless report paths."""
+
+    def render(self, language: str, message_ref: MessageRef, fallback: str) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +79,18 @@ class RunHistory:
                     "ON CONFLICT(singleton) DO UPDATE SET version = excluded.version"
                 )
 
-    def save(self, report: RunReport) -> None:
-        payload = json.dumps(report.to_dict(), separators=(",", ":"), sort_keys=True)
+    def save(
+        self,
+        report: RunReport,
+        *,
+        language: str = "en",
+        renderer: MessageRenderer | None = None,
+    ) -> None:
+        payload = json.dumps(
+            localized_report_dict(report, language, renderer),
+            separators=(",", ":"),
+            sort_keys=True,
+        )
         with self._connect() as connection:
             connection.execute(
                 """INSERT INTO runs(
@@ -139,3 +155,64 @@ class RunHistory:
                 "SELECT report_json FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
         return json.loads(row["report_json"]) if row else None
+
+
+def localized_report_dict(
+    report: RunReport,
+    language: str,
+    renderer: MessageRenderer | None = None,
+) -> dict[str, Any]:
+    """Return a localized presentation payload without changing canonical report data."""
+
+    if renderer is None:
+        from .localization import CatalogRenderer
+
+        renderer = CatalogRenderer()
+
+    language_code = language.strip() or "en"
+    payload = report.to_dict()
+    payload["language"] = language_code
+
+    localized_explanations: list[str] = []
+    for index, fallback in enumerate(report.explanations):
+        message_ref = (
+            report.explanation_refs[index] if index < len(report.explanation_refs) else None
+        )
+        localized_explanations.append(
+            renderer.render(language_code, message_ref, fallback) if message_ref else fallback
+        )
+    payload["explanations"] = localized_explanations
+
+    localized_diagnostics = payload.get("diagnostics", [])
+    for diagnostic_payload, diagnostic in zip(
+        localized_diagnostics,
+        report.diagnostics,
+        strict=False,
+    ):
+        if diagnostic.message_ref is not None:
+            diagnostic_payload["message"] = renderer.render(
+                language_code,
+                diagnostic.message_ref,
+                diagnostic.message,
+            )
+    return payload
+
+
+def write_localized_report(
+    path: Path,
+    report: RunReport,
+    language: str,
+    renderer: MessageRenderer | None = None,
+) -> None:
+    """Write a human-facing localized report while retaining canonical IDs and refs."""
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(
+            localized_report_dict(report, language, renderer),
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )

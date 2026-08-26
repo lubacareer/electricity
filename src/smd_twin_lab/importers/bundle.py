@@ -19,6 +19,7 @@ from smd_twin_lab.models import (
     Diagnostic,
     DiagnosticSeverity,
     ImportedProject,
+    MessageRef,
     Net,
     PinRef,
     ProjectCapabilities,
@@ -28,15 +29,29 @@ BUNDLE_FILENAME = "project.json"
 BUNDLE_FORMAT = "smd-twin-lab.imported-project"
 BUNDLE_VERSION = 1
 
+_FIRST_PARTY_CAPABILITY_MESSAGES = {
+    "Bundled normalized board and previews": "capability.sample_bundle.geometry",
+    "NTC divider ngspice fixture": "capability.sample_bundle.circuit",
+    "Reference state model; Renode plugin qualification pending": (
+        "capability.sample_bundle.firmware"
+    ),
+    "No physical target connected": "capability.sample_bundle.hardware",
+}
+
 
 def _unavailable_capabilities(detail: str) -> ProjectCapabilities:
     unavailable = Capability(CapabilityStatus.UNAVAILABLE, detail)
     return ProjectCapabilities(unavailable, unavailable, unavailable, unavailable)
 
 
-def _invalid_project(path: Path, code: str, message: str) -> ImportedProject:
+def _invalid_project(
+    path: Path,
+    code: str,
+    message: str,
+    message_ref: MessageRef,
+) -> ImportedProject:
     identity = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:16]
-    invalid = Capability(CapabilityStatus.INVALID, message)
+    invalid = Capability(CapabilityStatus.INVALID, message, message_ref=message_ref)
     return ImportedProject(
         schema_version=1,
         project_id=identity,
@@ -51,7 +66,13 @@ def _invalid_project(path: Path, code: str, message: str) -> ImportedProject:
         geometry=BoardGeometry(),
         capabilities=ProjectCapabilities(invalid, invalid, invalid, invalid),
         diagnostics=(
-            Diagnostic(DiagnosticSeverity.ERROR, code, message, path=str(path.resolve())),
+            Diagnostic(
+                DiagnosticSeverity.ERROR,
+                code,
+                message,
+                path=str(path.resolve()),
+                message_ref=message_ref,
+            ),
         ),
     )
 
@@ -106,11 +127,30 @@ def _status(value: Any) -> CapabilityStatus:
         return CapabilityStatus.INVALID
 
 
-def _capability(value: Any, fallback: str) -> Capability:
+def _message_ref(value: Any) -> MessageRef | None:
+    if not isinstance(value, dict) or not isinstance(value.get("message_id"), str):
+        return None
+    parameters = value.get("parameters", {})
+    count = value.get("count")
+    if not isinstance(parameters, dict) or (count is not None and not isinstance(count, int)):
+        return None
+    try:
+        return MessageRef(value["message_id"], parameters, count)
+    except (TypeError, ValueError):
+        return None
+
+
+def _capability(value: Any, fallback: str, fallback_ref: MessageRef) -> Capability:
     if not isinstance(value, dict):
-        return Capability(CapabilityStatus.UNAVAILABLE, fallback)
+        return Capability(CapabilityStatus.UNAVAILABLE, fallback, message_ref=fallback_ref)
+    detail = str(value.get("detail", fallback))
+    message_ref = _message_ref(value.get("message_ref"))
+    if message_ref is None and detail in _FIRST_PARTY_CAPABILITY_MESSAGES:
+        message_ref = MessageRef(_FIRST_PARTY_CAPABILITY_MESSAGES[detail])
     return Capability(
-        _status(value.get("status", "unavailable")), str(value.get("detail", fallback))
+        _status(value.get("status", "unavailable")),
+        detail,
+        message_ref=message_ref,
     )
 
 
@@ -147,6 +187,10 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                     "BUNDLE_COMPONENT_INVALID",
                     f"Component entry {index} has no reference designator.",
                     path=str(bundle_path),
+                    message_ref=MessageRef(
+                        "diagnostic.bundle.component_missing_reference",
+                        {"index": index},
+                    ),
                 )
             )
             continue
@@ -174,6 +218,13 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                     "BUNDLE_COMPONENT_INVALID",
                     f"Component {raw.get('reference', index)!r} is invalid: {exc}",
                     path=str(bundle_path),
+                    message_ref=MessageRef(
+                        "diagnostic.bundle.component_invalid",
+                        {
+                            "reference": repr(raw.get("reference", index)),
+                            "detail": str(exc),
+                        },
+                    ),
                 )
             )
 
@@ -186,6 +237,10 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                     "BUNDLE_NET_INVALID",
                     f"Net entry {index} has no name.",
                     path=str(bundle_path),
+                    message_ref=MessageRef(
+                        "diagnostic.bundle.net_missing_name",
+                        {"index": index},
+                    ),
                 )
             )
             continue
@@ -205,6 +260,7 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                 "BUNDLE_GEOMETRY_INVALID",
                 "The geometry entry must be an object.",
                 path=str(bundle_path),
+                message_ref=MessageRef("diagnostic.bundle.geometry_not_object"),
             )
         )
     try:
@@ -225,6 +281,10 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                 "BUNDLE_GEOMETRY_INVALID",
                 f"The geometry bounds are invalid: {exc}",
                 path=str(bundle_path),
+                message_ref=MessageRef(
+                    "diagnostic.bundle.geometry_bounds_invalid",
+                    {"detail": str(exc)},
+                ),
             )
         )
 
@@ -232,16 +292,24 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
     if not isinstance(capabilities_raw, dict):
         capabilities_raw = {}
     geometry_capability = _capability(
-        capabilities_raw.get("geometry"), "No geometry capability recorded in bundle."
+        capabilities_raw.get("geometry"),
+        "No geometry capability recorded in bundle.",
+        MessageRef("capability.bundle.geometry_not_recorded"),
     )
     circuit_capability = _capability(
-        capabilities_raw.get("circuit"), "No circuit capability recorded in bundle."
+        capabilities_raw.get("circuit"),
+        "No circuit capability recorded in bundle.",
+        MessageRef("capability.bundle.circuit_not_recorded"),
     )
     firmware_capability = _capability(
-        capabilities_raw.get("firmware"), "No firmware capability recorded in bundle."
+        capabilities_raw.get("firmware"),
+        "No firmware capability recorded in bundle.",
+        MessageRef("capability.bundle.firmware_not_recorded"),
     )
     hardware_capability = _capability(
-        capabilities_raw.get("hardware"), "No hardware capability recorded in bundle."
+        capabilities_raw.get("hardware"),
+        "No hardware capability recorded in bundle.",
+        MessageRef("capability.bundle.hardware_not_recorded"),
     )
 
     listed_geometry = [
@@ -259,11 +327,17 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                 "BUNDLE_ASSET_MISSING",
                 "Bundle is missing geometry assets: " + ", ".join(missing_geometry) + ".",
                 path=str(bundle_path),
+                message_ref=MessageRef(
+                    "diagnostic.bundle.geometry_assets_missing",
+                    {"assets": ", ".join(missing_geometry)},
+                    count=len(missing_geometry),
+                ),
             )
         )
         geometry_capability = Capability(
             CapabilityStatus.INVALID,
             "One or more geometry files named by the bundle are missing.",
+            message_ref=MessageRef("capability.bundle.geometry_assets_missing"),
         )
 
     spice_path = _resolve_asset(payload.get("spice_netlist_path"), bundle_dir)
@@ -274,10 +348,13 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                 "BUNDLE_SPICE_MISSING",
                 "The SPICE netlist named by the bundle is missing.",
                 path=spice_path,
+                message_ref=MessageRef("diagnostic.bundle.spice_missing"),
             )
         )
         circuit_capability = Capability(
-            CapabilityStatus.INVALID, "The bundled SPICE netlist is missing."
+            CapabilityStatus.INVALID,
+            "The bundled SPICE netlist is missing.",
+            message_ref=MessageRef("capability.bundle.spice_missing"),
         )
 
     manifest_path = _resolve_asset(payload.get("twin_manifest_path"), bundle_dir)
@@ -288,11 +365,14 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                 "BUNDLE_MANIFEST_MISSING",
                 "The twin manifest named by the bundle is missing.",
                 path=manifest_path,
+                message_ref=MessageRef("diagnostic.bundle.manifest_missing"),
             )
         )
         if firmware_capability.status == CapabilityStatus.AVAILABLE:
             firmware_capability = Capability(
-                CapabilityStatus.INVALID, "The bundled twin manifest is missing."
+                CapabilityStatus.INVALID,
+                "The bundled twin manifest is missing.",
+                message_ref=MessageRef("capability.bundle.manifest_missing"),
             )
 
     for raw in payload.get("diagnostics", []):
@@ -305,6 +385,7 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                 message=str(raw.get("message", "")),
                 reference=str(raw["reference"]) if raw.get("reference") is not None else None,
                 path=str(raw["path"]) if raw.get("path") is not None else None,
+                message_ref=_message_ref(raw.get("message_ref")),
             )
         )
 
@@ -317,9 +398,20 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
                 "BUNDLE_SCHEMA_UNSUPPORTED",
                 detail,
                 path=str(bundle_path),
+                message_ref=MessageRef(
+                    "diagnostic.bundle.schema_unsupported",
+                    {"schema_version": schema_version},
+                ),
             )
         )
-        invalid = Capability(CapabilityStatus.INVALID, detail)
+        invalid = Capability(
+            CapabilityStatus.INVALID,
+            detail,
+            message_ref=MessageRef(
+                "capability.bundle.schema_unsupported",
+                {"schema_version": schema_version},
+            ),
+        )
         geometry_capability = circuit_capability = firmware_capability = hardware_capability = (
             invalid
         )
@@ -369,6 +461,7 @@ def load_bundle(path: Path) -> ImportedProject:
             "BUNDLE_NOT_FOUND",
             "No normalized project JSON was found. Select project.json or its "
             "containing bundle folder.",
+            MessageRef("diagnostic.bundle.not_found"),
         )
     try:
         raw = json.loads(bundle_path.read_text(encoding="utf-8-sig"))
@@ -377,12 +470,17 @@ def load_bundle(path: Path) -> ImportedProject:
             bundle_path,
             "BUNDLE_JSON_INVALID",
             f"The normalized project JSON could not be read: {exc}",
+            MessageRef(
+                "diagnostic.bundle.json_invalid",
+                {"detail": str(exc)},
+            ),
         )
     if not isinstance(raw, dict):
         return _invalid_project(
             bundle_path,
             "BUNDLE_ROOT_INVALID",
             "The normalized project JSON root must be an object.",
+            MessageRef("diagnostic.bundle.root_invalid"),
         )
     payload = raw.get("project", raw)
     if not isinstance(payload, dict):
@@ -390,6 +488,7 @@ def load_bundle(path: Path) -> ImportedProject:
             bundle_path,
             "BUNDLE_PROJECT_INVALID",
             "The bundle's project entry must be an object.",
+            MessageRef("diagnostic.bundle.project_entry_invalid"),
         )
     try:
         return _decode_project(payload, bundle_path)
@@ -398,6 +497,10 @@ def load_bundle(path: Path) -> ImportedProject:
             bundle_path,
             "BUNDLE_PROJECT_INVALID",
             f"The normalized project data is invalid: {exc}",
+            MessageRef(
+                "diagnostic.bundle.project_data_invalid",
+                {"detail": str(exc)},
+            ),
         )
 
 

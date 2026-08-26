@@ -18,6 +18,7 @@ from ..models import (
     FirmwareRequest,
     FirmwareResult,
     FirmwareState,
+    MessageRef,
 )
 from ..tooling import discover_tools
 from .process import run_isolated_process
@@ -167,6 +168,7 @@ class RenodeFirmwareEngine:
             return self._failure(
                 "Renode, the firmware ELF, or the STM32G071 integration script is unavailable.",
                 "renode.unavailable",
+                message_ref=MessageRef("diagnostic.renode.unavailable"),
             )
 
         assert self.firmware_path is not None
@@ -197,24 +199,40 @@ class RenodeFirmwareEngine:
                     cancel_event=cancel_event,
                 )
         except (OSError, ValueError) as exc:
-            return self._failure(str(exc), "renode.launch_failed")
+            return self._failure(
+                str(exc),
+                "renode.launch_failed",
+                message_ref=MessageRef(
+                    "diagnostic.renode.launch_failed",
+                    {"detail": str(exc)},
+                ),
+            )
 
         if process.cancelled:
             return self._failure(
                 "Renode execution was cancelled.",
                 "renode.cancelled",
+                message_ref=MessageRef("diagnostic.renode.cancelled"),
                 stderr=process.stderr,
             )
         if process.timed_out:
             return self._failure(
                 f"Renode exceeded the {self.timeout_s:g} second timeout.",
                 "renode.timeout",
+                message_ref=MessageRef(
+                    "diagnostic.renode.timeout",
+                    {"timeout": f"{self.timeout_s:g}"},
+                ),
                 stderr=process.stderr,
             )
         if process.returncode != 0:
             return self._failure(
                 f"Renode exited with status {process.returncode}.",
                 "renode.failed",
+                message_ref=MessageRef(
+                    "diagnostic.renode.failed",
+                    {"status": process.returncode},
+                ),
                 stderr=process.stderr,
             )
         try:
@@ -223,6 +241,10 @@ class RenodeFirmwareEngine:
             return self._failure(
                 str(exc),
                 "renode.invalid_output",
+                message_ref=MessageRef(
+                    "diagnostic.renode.invalid_output",
+                    {"detail": str(exc)},
+                ),
                 stderr=process.stderr,
             )
 
@@ -266,7 +288,13 @@ class RenodeFirmwareEngine:
         )
 
     @staticmethod
-    def _failure(message: str, code: str, *, stderr: str = "") -> FirmwareResult:
+    def _failure(
+        message: str,
+        code: str,
+        *,
+        message_ref: MessageRef | None = None,
+        stderr: str = "",
+    ) -> FirmwareResult:
         return FirmwareResult(
             success=False,
             engine="renode",
@@ -278,6 +306,7 @@ class RenodeFirmwareEngine:
                     severity=DiagnosticSeverity.ERROR,
                     code=code,
                     message=message,
+                    message_ref=message_ref,
                 ),
             ),
         )
