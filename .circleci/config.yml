@@ -1,0 +1,155 @@
+version: 2.1
+
+jobs:
+  verify:
+    docker:
+      - image: cimg/python:3.13.14
+    environment:
+      QT_QPA_PLATFORM: "offscreen"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - checkout
+
+      - restore_cache:
+          keys:
+            - v1-pip-py313-{{ arch }}-{{ checksum "pyproject.toml" }}
+      - restore_cache:
+          keys:
+            - v1-rustup-rust1971-{{ arch }}
+      - restore_cache:
+          keys:
+            - v1-cargo-rust1971-{{ arch }}-{{ checksum "Cargo.lock" }}
+
+      - run:
+          name: Install Linux Qt runtime libraries
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends libxkbcommon0 libegl1
+
+      - run:
+          name: Install the repository-pinned Rust toolchain
+          command: |
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+            source "$BASH_ENV"
+            if ! command -v rustup >/dev/null 2>&1; then
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+                | sh -s -- -y --profile minimal --default-toolchain none
+            fi
+            cargo --version
+            rustc --version
+            cargo fmt --version
+            cargo clippy --version
+
+      - save_cache:
+          key: v1-rustup-rust1971-{{ arch }}
+          paths:
+            - ~/.rustup
+            - ~/.cargo/bin
+
+      - run:
+          name: Install Python dependencies
+          command: |
+            python -m venv .venv
+            echo 'export PATH="$PWD/.venv/bin:$PATH"' >> "$BASH_ENV"
+            source "$BASH_ENV"
+            python -m pip install -e ".[dev]"
+
+      - save_cache:
+          key: v1-pip-py313-{{ arch }}-{{ checksum "pyproject.toml" }}
+          paths:
+            - ~/.cache/pip
+
+      - run:
+          name: Verify Rust workspace
+          command: |
+            cargo fmt --all --check
+            cargo clippy --workspace --all-targets --locked -- -D warnings
+            cargo test --workspace --all-targets --locked
+            cargo build --workspace --locked
+
+      - save_cache:
+          key: v1-cargo-rust1971-{{ arch }}-{{ checksum "Cargo.lock" }}
+          paths:
+            - ~/.cargo/registry
+            - ~/.cargo/git
+
+      - run:
+          name: Verify Python project
+          command: |
+            python -m ruff check .
+            python -m ruff format --check .
+            mkdir -p test-results
+            python -m pytest -q --junitxml=test-results/pytest.xml
+
+      - store_test_results:
+          path: test-results
+
+      - run:
+          name: Build and smoke-test the wheel
+          command: |
+            python -m pip wheel . --no-deps --wheel-dir dist
+            smoke_root="$(mktemp -d)"
+            smoke_python="$smoke_root/venv/bin/python"
+            wheel="$(find "$PWD/dist" -maxdepth 1 -type f -name 'smd_twin_lab-*.whl' -print -quit)"
+            test -n "$wheel"
+            python -m venv "$smoke_root/venv"
+            "$smoke_python" -m pip install "$wheel"
+            cd "$smoke_root"
+            "$smoke_python" - \<<'PY'
+            from importlib.resources import files
+
+            from smd_twin_lab.eda import divider_project, simulate_dc
+
+            root = files("smd_twin_lab")
+            expected = (
+                "resources/i18n/smd_twin_lab_ru.qm",
+                "resources/lessons/en/aoi.md",
+                "resources/lessons/en/faults.md",
+                "resources/lessons/en/getting_started.md",
+                "resources/lessons/en/simulation.md",
+                "resources/lessons/ru/aoi.md",
+                "resources/lessons/ru/faults.md",
+                "resources/lessons/ru/getting_started.md",
+                "resources/lessons/ru/simulation.md",
+            )
+            missing = [path for path in expected if not root.joinpath(*path.split("/")).is_file()]
+            assert not missing, missing
+
+            result = simulate_dc(divider_project())
+            assert result.success
+            assert abs(result.voltage("VOUT") - 1.65) < 1e-9
+            PY
+            "$smoke_python" -m smd_twin_lab.cli tools
+            "$smoke_python" -m smd_twin_lab.cli demo --engine reference --fault none
+            "$smoke_python" -m smd_twin_lab.cli demo \
+              --engine reference --fault thermistor_open
+            "$smoke_python" - \<<'PY'
+            from pathlib import Path
+
+            from PySide6 import QtCore
+
+            from smd_twin_lab.app import build_window, create_application
+            from smd_twin_lab.localization import current_language_manager
+
+            settings = QtCore.QSettings(
+                str(Path.cwd() / "wheel-smoke.ini"),
+                QtCore.QSettings.Format.IniFormat,
+            )
+            app = create_application([], settings=settings, system_languages=("ru-RU",))
+            manager = current_language_manager()
+            window = build_window(language_manager=manager)
+            assert manager.current_language == "ru"
+            assert window.file_menu.title() == "\u0424\u0430\u0439\u043b"
+            assert window.project.name == "USB Sensor/Status Board"
+            window.close()
+            app.processEvents()
+            PY
+
+      - store_artifacts:
+          path: dist
+
+workflows:
+  ci:
+    jobs:
+      - verify
