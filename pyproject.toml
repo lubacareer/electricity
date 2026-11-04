@@ -17,6 +17,7 @@ dependencies = [
   "PyYAML>=6.0.2,<7",
   "platformdirs>=4.3,<5",
   "msgpack==1.2.1",
+  "defusedxml>=0.7.1,<1",
 ]
 
 [project.optional-dependencies]

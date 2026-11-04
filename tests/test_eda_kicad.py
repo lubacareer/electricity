@@ -157,6 +157,33 @@ def test_semantic_netlist_summary_is_stable(tmp_path: Path) -> None:
     assert _semantic_netlist_summary(path) == (("R1", "R2"), ("/GND", "/VOUT"))
 
 
+def test_bridge_reports_entity_in_semantic_netlist(tmp_path: Path, monkeypatch) -> None:
+    cli = tmp_path / "kicad-cli"
+    cli.touch()
+    bridge = KiCad10Bridge(kicad_cli=cli)
+    generated = bridge.generate(_document(), tmp_path / "generated")
+
+    def fake_run(argv, **kwargs):
+        if "--output" in argv:
+            path = Path(argv[argv.index("--output") + 1])
+            if path.suffix == ".xml":
+                path.write_text(
+                    '<!DOCTYPE export [<!ENTITY x "R1">]>'
+                    '<export><components><comp ref="&x;"/></components></export>',
+                    encoding="utf-8",
+                )
+            else:
+                path.write_text("{}", encoding="utf-8")
+        return ProcessResult(tuple(map(str, argv)), 0, "10.0.5", "")
+
+    monkeypatch.setattr("smd_twin_lab.eda.kicad.run_isolated_process", fake_run)
+    report = bridge.validate(generated)
+
+    assert report.status is BridgeStatus.INVALID
+    assert not report.semantic_match
+    assert any(item.code == "KICAD_SEMANTIC_XML" for item in report.diagnostics)
+
+
 def test_schematic_polylines_are_serialized_as_kicad_segments() -> None:
     document = _document()
     wire = SchematicWire(

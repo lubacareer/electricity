@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import csv
 import re
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from smd_twin_lab.models import ComponentSide, Net, PinRef
 
@@ -227,7 +229,7 @@ def parse_logical_netlist(path: Path) -> tuple[tuple[Net, ...], dict[str, dict[s
 
     try:
         root = ET.parse(path).getroot()
-    except (ET.ParseError, OSError, UnicodeError) as exc:
+    except (ET.ParseError, DefusedXmlException, OSError, UnicodeError) as exc:
         raise ArtifactParseError(f"invalid KiCad XML netlist: {exc}") from exc
     if root.tag != "export" and root.find("nets") is None:
         raise ArtifactParseError("logical netlist has no KiCad export/nets root")
@@ -279,7 +281,7 @@ def natural_key(value: str) -> tuple[Any, ...]:
 def validate_svg(path: Path) -> None:
     try:
         root = ET.parse(path).getroot()
-    except (ET.ParseError, OSError, UnicodeError) as exc:
+    except (ET.ParseError, DefusedXmlException, OSError, UnicodeError) as exc:
         raise ArtifactParseError(f"invalid SVG: {exc}") from exc
     if root.tag.rsplit("}", 1)[-1].casefold() != "svg":
         raise ArtifactParseError("preview root element is not SVG")

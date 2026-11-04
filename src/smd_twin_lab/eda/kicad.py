@@ -13,11 +13,13 @@ import json
 import re
 import shutil
 import tempfile
-import xml.etree.ElementTree as ElementTree
 from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from uuid import UUID, uuid5
+
+from defusedxml import ElementTree
+from defusedxml.common import DefusedXmlException
 
 from ..engines.process import ProcessResult, run_isolated_process
 from ..tooling import discover_tools
@@ -750,7 +752,7 @@ class KiCad10Bridge:
                                 str(semantic_path),
                             )
                         )
-                except (OSError, ElementTree.ParseError) as error:
+                except (OSError, ElementTree.ParseError, DefusedXmlException) as error:
                     semantic_match = False
                     diagnostics.append(
                         BridgeDiagnostic(
