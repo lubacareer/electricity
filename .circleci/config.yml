@@ -9,7 +9,14 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     steps:
-      - checkout
+      # This is a public repository; HTTPS avoids relying on a CircleCI SSH key.
+      - run:
+          name: Checkout code over HTTPS
+          command: |
+            git init
+            git remote add origin "https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git"
+            git fetch --depth=1 origin "$CIRCLE_SHA1"
+            git checkout --detach FETCH_HEAD
 
       - restore_cache:
           keys:
