@@ -8,6 +8,7 @@ import io
 import math
 import os
 import re
+import stat
 import sys
 import xml.etree.ElementTree as std_et
 from dataclasses import dataclass
@@ -26,11 +27,37 @@ MAX_DEPTH = 4
 MAX_XML_DEPTH = 128
 MAX_XML_NODES = 100_000
 MAX_TOTAL_PIXELS = 16_000_000
-_ELEMENTS = frozenset({
-    "svg", "g", "defs", "symbol", "use", "path", "rect", "circle", "ellipse",
-    "line", "polyline", "polygon", "text", "tspan", "title", "desc", "image",
-    "linearGradient", "radialGradient", "stop", "clipPath", "mask", "pattern", "style",
-})
+MAX_SVG_DIMENSION = 16_384
+MAX_REFERENCE_EXPANSION = 100_000
+MAX_VIEWBOX_COORDINATE = 1_000_000_000
+_ELEMENTS = frozenset(
+    {
+        "svg",
+        "g",
+        "defs",
+        "symbol",
+        "use",
+        "path",
+        "rect",
+        "circle",
+        "ellipse",
+        "line",
+        "polyline",
+        "polygon",
+        "text",
+        "tspan",
+        "title",
+        "desc",
+        "image",
+        "linearGradient",
+        "radialGradient",
+        "stop",
+        "clipPath",
+        "mask",
+        "pattern",
+        "style",
+    }
+)
 _URL = re.compile(r"url\s*\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE)
 
 
@@ -66,23 +93,50 @@ def _raster_pixels(raw: bytes, mime: str, budget: _Budget) -> None:
     budget.consume_pixels(size.width(), size.height())
 
 
-def _nested_svg_pixels(root: std_et.Element, budget: _Budget) -> None:
+def _svg_pixels(root: std_et.Element, budget: _Budget) -> None:
     width, height = root.get("width"), root.get("height")
+    viewbox = root.get("viewBox")
+    box = None
+    if viewbox:
+        box = re.split(r"[,\s]+", viewbox.strip())
+        try:
+            coordinates = [float(value) for value in box]
+        except ValueError as exc:
+            raise UnsafeSvg("invalid SVG viewBox") from exc
+        if (
+            len(coordinates) != 4
+            or any(
+                not math.isfinite(value) or abs(value) > MAX_VIEWBOX_COORDINATE
+                for value in coordinates
+            )
+            or coordinates[2] <= 0
+            or coordinates[3] <= 0
+        ):
+            raise UnsafeSvg("invalid or oversized SVG viewBox")
     if width is not None and height is not None:
         values = (width, height)
-    elif width is None and height is None and root.get("viewBox"):
-        box = re.split(r"[,\s]+", root.get("viewBox", "").strip())
-        if len(box) != 4:
-            raise UnsafeSvg("nested SVG requires bounded pixel dimensions")
+    elif width is None and height is None and box:
         values = (box[2], box[3])
     else:
-        raise UnsafeSvg("nested SVG requires bounded pixel dimensions")
+        raise UnsafeSvg("SVG requires bounded dimensions")
     sizes = []
     for value in values:
-        if not re.fullmatch(r"(?:\d+(?:\.\d*)?|\.\d+)(?:px)?", value):
-            raise UnsafeSvg("nested SVG requires pixel dimensions")
-        number = float(value.removesuffix("px"))
-        if not math.isfinite(number) or number > MAX_TOTAL_PIXELS:
+        match = re.fullmatch(
+            r"((?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(px|mm|cm|in|pt|pc)?", value
+        )
+        if not match:
+            raise UnsafeSvg("SVG requires bounded absolute dimensions")
+        scale = {
+            None: 1,
+            "px": 1,
+            "mm": 96 / 25.4,
+            "cm": 96 / 2.54,
+            "in": 96,
+            "pt": 96 / 72,
+            "pc": 16,
+        }[match.group(2)]
+        number = float(match.group(1)) * scale
+        if not math.isfinite(number) or number > MAX_SVG_DIMENSION:
             raise UnsafeSvg("invalid or oversized image dimensions")
         sizes.append(math.ceil(number))
     budget.consume_pixels(*sizes)
@@ -119,7 +173,18 @@ def _opened_file_path(source: io.BufferedReader) -> Path:
 
 def _read_bounded(path: Path, budget: _Budget, *, within: Path | None = None) -> bytes:
     try:
-        with path.open("rb") as source:
+        if os.name == "nt" and os.path.isreserved(str(path)):
+            raise UnsafeSvg("reserved device paths are unsupported")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise UnsafeSvg("SVG resources must be regular files")
+            source = os.fdopen(descriptor, "rb")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        with source:
             if within is not None:
                 try:
                     opened_path = _opened_file_path(source)
@@ -135,16 +200,19 @@ def _read_bounded(path: Path, budget: _Budget, *, within: Path | None = None) ->
     return data
 
 
-def _check_css(value: str) -> None:
+def _check_css(value: str) -> list[str]:
     # No escaped CSS or at-rules: both make resource references ambiguous.
     if "\\" in value or "@" in value or "/*" in value:
         raise UnsafeSvg("CSS escapes, comments and at-rules are unsupported")
+    references = []
     for match in _URL.finditer(value):
         if not re.fullmatch(r"#[A-Za-z_][A-Za-z0-9_.:-]*", match.group(2)):
             raise UnsafeSvg("external CSS resources are unsupported")
+        references.append(match.group(2)[1:])
     # Reject malformed or obfuscated url() rather than handing it to Qt.
     if re.search(r"url\s*\(", _URL.sub("", value), re.IGNORECASE):
         raise UnsafeSvg("unsupported CSS resource reference")
+    return references
 
 
 def _resource(value: str, base: Path, budget: _Budget, depth: int) -> str:
@@ -197,6 +265,40 @@ def _resource(value: str, base: Path, budget: _Budget, depth: int) -> str:
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
 
 
+def _check_reference_graph(elements, ids, references) -> None:
+    """Bound both recursive and exponentially expanding in-document references."""
+    edges = {element: list(element) for element in elements}
+    for source, name in references:
+        target = ids.get(name)
+        if target is not None:
+            edges[source].append(target)
+    states = {}
+    weights = {}
+    for start in elements:
+        if states.get(start):
+            continue
+        states[start] = 1
+        stack = [(start, 0)]
+        while stack:
+            element, index = stack[-1]
+            children = edges[element]
+            if index == len(children):
+                weight = 1 + sum(weights[child] for child in children)
+                if weight > MAX_REFERENCE_EXPANSION:
+                    raise UnsafeSvg("SVG reference expansion limit exceeded")
+                weights[element] = weight
+                states[element] = 2
+                stack.pop()
+                continue
+            child = children[index]
+            stack[-1] = (element, index + 1)
+            if states.get(child) == 1:
+                raise UnsafeSvg("cyclic SVG references are unsupported")
+            if not states.get(child):
+                states[child] = 1
+                stack.append((child, 0))
+
+
 def _prepare(raw: bytes, base: Path, budget: _Budget, depth: int) -> bytes:
     if depth > MAX_DEPTH:
         raise UnsafeSvg("nested SVG depth limit exceeded")
@@ -213,14 +315,16 @@ def _prepare(raw: bytes, base: Path, budget: _Budget, depth: int) -> bytes:
             else:
                 nesting -= 1
         root = parser.root
-    except (std_et.ParseError, DefusedXmlException, ValueError) as exc:
+    except (std_et.ParseError, DefusedXmlException, LookupError, ValueError) as exc:
         raise UnsafeSvg(f"invalid SVG XML: {exc}") from exc
     if root.tag not in ("svg", f"{{{SVG_NS}}}svg"):
         raise UnsafeSvg("preview root element is not SVG")
-    if depth:
-        _nested_svg_pixels(root, budget)
+    _svg_pixels(root, budget)
 
     pending = [(root, 0)]
+    elements = []
+    references = []
+    ids = {}
     count = 0
     while pending:
         element, xml_depth = pending.pop()
@@ -236,6 +340,12 @@ def _prepare(raw: bytes, base: Path, budget: _Budget, depth: int) -> bytes:
             namespace, local = "", element.tag
         if namespace not in ("", SVG_NS) or local not in _ELEMENTS:
             raise UnsafeSvg(f"unsupported SVG element: {local}")
+        elements.append(element)
+        element_id = element.get("id")
+        if element_id:
+            if element_id in ids:
+                raise UnsafeSvg("duplicate SVG identifiers are unsupported")
+            ids[element_id] = element
         if not namespace:
             element.tag = f"{{{SVG_NS}}}{local}"
         if XML_BASE in element.attrib:
@@ -250,14 +360,18 @@ def _prepare(raw: bytes, base: Path, budget: _Budget, depth: int) -> bytes:
                 element.attrib[key] = _resource(value, base, budget, depth)
             elif not re.fullmatch(r"#[A-Za-z_][A-Za-z0-9_.:-]*", value):
                 raise UnsafeSvg("only internal SVG references are supported")
+            else:
+                references.append((element, value[1:]))
         for key, value in element.attrib.items():
             if key not in ("href", XLINK_HREF):
-                _check_css(value)
+                references.extend((element, name) for name in _check_css(value))
         if local == "style":
             if len(element):
                 raise UnsafeSvg("nested style elements are unsupported")
-            if element.text:
-                _check_css(element.text)
+            if element.text and _check_css(element.text):
+                raise UnsafeSvg("SVG stylesheet fragment references are unsupported")
+
+    _check_reference_graph(elements, ids, references)
 
     # Qt's embedded SVG decoder requires the default SVG namespace.
     std_et.register_namespace("", SVG_NS)

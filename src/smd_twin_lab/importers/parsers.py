@@ -17,6 +17,7 @@ from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 
 from smd_twin_lab.models import ComponentSide, Net, PinRef
+from smd_twin_lab.xml_security import parse_bounded_xml
 
 
 class ArtifactParseError(ValueError):
@@ -228,7 +229,7 @@ def parse_logical_netlist(path: Path) -> tuple[tuple[Net, ...], dict[str, dict[s
     """Return logical nets and schematic component metadata from KiCad XML."""
 
     try:
-        root = ET.parse(path).getroot()
+        root = parse_bounded_xml(path)
     except (ET.ParseError, DefusedXmlException, OSError, UnicodeError) as exc:
         raise ArtifactParseError(f"invalid KiCad XML netlist: {exc}") from exc
     if root.tag != "export" and root.find("nets") is None:
@@ -280,7 +281,7 @@ def natural_key(value: str) -> tuple[Any, ...]:
 
 def validate_svg(path: Path) -> None:
     try:
-        root = ET.parse(path).getroot()
+        root = parse_bounded_xml(path)
     except (ET.ParseError, DefusedXmlException, OSError, UnicodeError) as exc:
         raise ArtifactParseError(f"invalid SVG: {exc}") from exc
     if root.tag.rsplit("}", 1)[-1].casefold() != "svg":

@@ -103,15 +103,17 @@ Board SVG previews are read as bounded snapshots before display. Supported
 resources are PNG, JPEG, GIF, and recursively checked SVG images embedded as
 data URIs or referenced by relative paths within the SVG's directory. Internal
 fragment references with names starting with a letter or underscore are
-supported. Remote or absolute resource paths, parent directory references,
-compressed SVG, XML entities, CSS escapes, comments and at-rules,
-external CSS resources, `xml:base`, and SVG elements outside the supported
-shape, text, image, gradient, clipping, mask, pattern, and grouping subset are
-rejected. Embedded SVG images must declare pixel dimensions or a viewBox;
-preview and image sizes are bounded. Relative image files are supported on
-Windows and Linux only, where their opened file handles can be checked. A
-rejected preview is skipped and reported in the application log;
-the rest of the project can still be inspected.
+supported when they are acyclic and have bounded expansion. Fragment references
+inside stylesheet text are not supported. Remote or absolute resource paths,
+parent directory references, compressed SVG, XML entities, CSS escapes,
+comments and at-rules, external CSS resources, `xml:base`, and SVG elements
+outside the supported shape, text, image, gradient, clipping, mask, pattern,
+and grouping subset are rejected. SVG previews must declare bounded absolute
+width and height, or a viewBox when both dimensions are absent. Image sizes are
+bounded and referenced files must be regular files. Relative
+image files are supported on Windows and Linux only, where their opened file
+handles can be checked. A rejected preview is skipped and reported in the
+application log; the rest of the project can still be inspected.
 
 ## Honest current status
 

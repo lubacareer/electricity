@@ -246,13 +246,15 @@ def test_bundle_rejects_missing_declared_logical_netlist(tmp_path: Path) -> None
 
     bundle = tmp_path / "project.json"
     bundle.write_text(
-        json.dumps({
-            "project_id": "example",
-            "components": [{"reference": "R1", "nets": ["GND"]}],
-            "nets": [{"name": "GND"}],
-            "capabilities": {"circuit": {"status": "available"}},
-            "artifacts": {"logical_netlist": "missing.xml"},
-        })
+        json.dumps(
+            {
+                "project_id": "example",
+                "components": [{"reference": "R1", "nets": ["GND"]}],
+                "nets": [{"name": "GND"}],
+                "capabilities": {"circuit": {"status": "available"}},
+                "artifacts": {"logical_netlist": "missing.xml"},
+            }
+        )
     )
     loaded = load_bundle(bundle)
     assert loaded.nets == ()
@@ -267,13 +269,15 @@ def test_bundle_rejects_changed_logical_netlist(tmp_path: Path) -> None:
     (tmp_path / "logical.xml").write_text("<export/>")
     bundle = tmp_path / "project.json"
     bundle.write_text(
-        json.dumps({
-            "project_id": "example",
-            "components": [{"reference": "R1", "nets": ["GND"]}],
-            "nets": [{"name": "GND"}],
-            "capabilities": {"circuit": {"status": "available"}},
-            "artifacts": {"logical_netlist": "logical.xml"},
-        })
+        json.dumps(
+            {
+                "project_id": "example",
+                "components": [{"reference": "R1", "nets": ["GND"]}],
+                "nets": [{"name": "GND"}],
+                "capabilities": {"circuit": {"status": "available"}},
+                "artifacts": {"logical_netlist": "logical.xml"},
+            }
+        )
     )
     loaded = load_bundle(bundle)
     assert loaded.nets == ()
@@ -291,13 +295,15 @@ def test_bundle_rejects_missing_normalized_logical_components(tmp_path: Path) ->
     )
     bundle = tmp_path / "project.json"
     bundle.write_text(
-        json.dumps({
-            "project_id": "example",
-            "components": [],
-            "nets": [{"name": "GND", "pins": [{"reference": "R1", "pin": "1"}]}],
-            "capabilities": {"circuit": {"status": "available"}},
-            "artifacts": {"logical_netlist": "logical.xml"},
-        })
+        json.dumps(
+            {
+                "project_id": "example",
+                "components": [],
+                "nets": [{"name": "GND", "pins": [{"reference": "R1", "pin": "1"}]}],
+                "capabilities": {"circuit": {"status": "available"}},
+                "artifacts": {"logical_netlist": "logical.xml"},
+            }
+        )
     )
     loaded = load_bundle(bundle)
     assert loaded.capabilities.circuit.status == CapabilityStatus.INVALID

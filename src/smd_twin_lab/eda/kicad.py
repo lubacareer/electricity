@@ -23,6 +23,7 @@ from defusedxml.common import DefusedXmlException
 
 from ..engines.process import ProcessResult, run_isolated_process
 from ..tooling import discover_tools
+from ..xml_security import parse_bounded_xml
 from .model import (
     BoardFootprint,
     BoardPad,
@@ -578,7 +579,7 @@ def _count_report_violations(payload: object) -> tuple[int, int]:
 
 
 def _semantic_netlist_summary(path: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    root = ElementTree.parse(path).getroot()
+    root = parse_bounded_xml(path)
     references = tuple(
         sorted(
             element.attrib["ref"]
