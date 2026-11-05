@@ -6,10 +6,11 @@ import hashlib
 import json
 import os
 import tempfile
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
+from smd_twin_lab.importers.parsers import ArtifactParseError, parse_logical_netlist, validate_svg
 from smd_twin_lab.models import (
     BoardGeometry,
     Capability,
@@ -311,6 +312,78 @@ def _decode_project(payload: dict[str, Any], bundle_path: Path) -> ImportedProje
         "No hardware capability recorded in bundle.",
         MessageRef("capability.bundle.hardware_not_recorded"),
     )
+
+    # Bundles and older import caches can contain XML that predates hardened parsing.
+    # Keep valid SVG files intact: Qt may need relative resources alongside them.
+    invalid_previews: list[str] = []
+    for field_name in ("top_preview_path", "bottom_preview_path", "outline_path"):
+        value = getattr(geometry, field_name)
+        path = Path(value) if value else None
+        if path is None or path.suffix.casefold() != ".svg" or not path.is_file():
+            continue
+        try:
+            validate_svg(path)
+        except ArtifactParseError as exc:
+            invalid_previews.append(field_name)
+            diagnostics.append(
+                Diagnostic(
+                    DiagnosticSeverity.ERROR,
+                    "BUNDLE_XML_INVALID",
+                    f"The bundled SVG is invalid: {exc}",
+                    path=str(path),
+                )
+            )
+    if invalid_previews:
+        geometry = replace(geometry, **dict.fromkeys(invalid_previews))
+        geometry_capability = Capability(
+            CapabilityStatus.INVALID, "One or more bundled SVG previews are invalid."
+        )
+
+    artifacts = payload.get("artifacts", {})
+    if isinstance(artifacts, dict) and "logical_netlist" in artifacts:
+        logical_path = _resolve_asset(artifacts["logical_netlist"], bundle_dir)
+        try:
+            if not logical_path:
+                raise ArtifactParseError("logical netlist path is empty")
+            parsed_nets, parsed_components = parse_logical_netlist(Path(logical_path))
+
+            def net_signature(items: tuple[Net, ...] | list[Net]) -> list[tuple[Any, ...]]:
+                return sorted(
+                    (
+                        net.name,
+                        tuple(sorted((pin.reference.casefold(), pin.pin) for pin in net.pins)),
+                    )
+                    for net in items
+                )
+
+            memberships: dict[str, set[str]] = {}
+            for net in parsed_nets:
+                for pin in net.pins:
+                    memberships.setdefault(pin.reference.casefold(), set()).add(net.name)
+            normalized_references = {component.reference.casefold() for component in components}
+            if (
+                net_signature(parsed_nets) != net_signature(nets)
+                or not set(parsed_components).issubset(normalized_references)
+                or any(
+                    set(component.nets) != memberships.get(component.reference.casefold(), set())
+                    for component in components
+                )
+            ):
+                raise ArtifactParseError("logical netlist does not match normalized bundle data")
+        except ArtifactParseError as exc:
+            diagnostics.append(
+                Diagnostic(
+                    DiagnosticSeverity.ERROR,
+                    "BUNDLE_XML_INVALID",
+                    f"The bundled logical netlist is invalid: {exc}",
+                    path=logical_path or str(bundle_path),
+                )
+            )
+            nets = []
+            components = [replace(component, nets=()) for component in components]
+            circuit_capability = Capability(
+                CapabilityStatus.INVALID, "The bundled logical netlist is invalid."
+            )
 
     listed_geometry = [
         ("outline", geometry.outline_path),

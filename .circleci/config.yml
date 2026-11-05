@@ -9,7 +9,29 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     steps:
-      - checkout
+      # This is a public repository; HTTPS avoids relying on a CircleCI SSH key.
+      - run:
+          name: Checkout code over HTTPS
+          command: |
+            git init
+            git remote add origin "https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git"
+            if [ -n "${CIRCLE_PULL_REQUEST:-}" ]; then
+              # GitHub exposes fork heads through the base repository's PR ref.
+              if [[ ! "$CIRCLE_PULL_REQUEST" =~ ^https://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9_.-]+)/pull/([0-9]+)/?$ ]]; then
+                echo "Unsupported pull request URL" >&2
+                exit 1
+              fi
+              pr_repo="https://github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}.git"
+              pr_number="${BASH_REMATCH[3]}"
+              # Include the triggering commit even if this queued build is far
+              # behind the current PR head.
+              git fetch "$pr_repo" "refs/pull/${pr_number}/head"
+            else
+              git fetch --depth=1 origin "$CIRCLE_SHA1"
+            fi
+            # Never silently test a newer PR head than the triggering commit.
+            git cat-file -e "${CIRCLE_SHA1}^{commit}"
+            git checkout --detach "$CIRCLE_SHA1"
 
       - restore_cache:
           keys:

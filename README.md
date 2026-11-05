@@ -99,6 +99,24 @@ Normalized import caches live under the Windows local application-data folder;
 run reports and `runs.sqlite3` live under the user application-data folder.
 Source KiCad files are never used as output locations.
 
+Board SVG previews are read as bounded snapshots before display. Supported
+resources are PNG, JPEG, GIF, and recursively checked SVG images embedded as
+data URIs or referenced by relative paths within the SVG's directory. Internal
+fragment references with names starting with a letter or underscore are
+supported when they are acyclic and have bounded expansion. Fragment references
+inside stylesheet text are not supported. Remote or absolute resource paths,
+parent directory references, compressed SVG, XML entities, CSS escapes,
+comments and at-rules, external CSS resources, `xml:base`, and SVG elements
+outside the supported shape, text, image, gradient, clipping, mask, pattern,
+and grouping subset are rejected. SVG previews must declare bounded absolute
+width and height, or a viewBox when both dimensions are absent. Image sizes are
+bounded and referenced files must be regular files. Relative
+image files are supported on Windows and Linux only, where their opened file
+handles can be checked. Bundle loading reports invalid SVG XML with a
+`BUNDLE_XML_INVALID` diagnostic and removes the preview path. Previews rejected
+later during rendering are skipped with an application-log warning; the rest of
+the project can still be inspected.
+
 ## Honest current status
 
 - The bundled normalized teaching model completes the nominal and RT1-open

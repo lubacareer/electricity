@@ -194,6 +194,145 @@ def test_kicad_import_exports_normalizes_and_preserves_sources(tmp_path: Path) -
     assert cached.diagnostics == project.diagnostics
 
 
+def test_cached_xml_is_revalidated_before_reuse(tmp_path: Path, monkeypatch: Any) -> None:
+    project_file, _ = _source_project(tmp_path)
+    cache_root = tmp_path / "cache"
+    project = KiCadProjectImporter(
+        kicad_cli=tmp_path / "fake-cli", cache_root=cache_root, runner=FakeKiCad()
+    ).import_project(project_file)
+    preview = Path(project.geometry.top_preview_path or "")
+    preview.write_text('<!DOCTYPE svg [<!ENTITY x "bad">]><svg>&x;</svg>')
+
+    importer = KiCadProjectImporter(cache_root=cache_root)
+    monkeypatch.setattr(importer, "_kicad_cli", lambda: None)
+    cached = importer.import_project(project_file)
+    assert cached.geometry.top_preview_path is None
+    assert any(d.code == "BUNDLE_XML_INVALID" for d in cached.diagnostics)
+
+
+def test_bundle_rejects_entity_xml_without_rewriting_valid_svg(tmp_path: Path) -> None:
+    from smd_twin_lab.importers.bundle import load_bundle
+
+    bad = tmp_path / "bad.svg"
+    bad.write_text('<!DOCTYPE svg [<!ENTITY x "bad">]><svg>&x;</svg>')
+    good = tmp_path / "good.svg"
+    content = '<svg xmlns="http://www.w3.org/2000/svg"><image href="picture.png"/></svg>'
+    good.write_text(content)
+    logical = tmp_path / "logical.xml"
+    logical.write_text('<!DOCTYPE export [<!ENTITY x "bad">]><export>&x;</export>')
+    payload = {
+        "schema_version": 1,
+        "project_id": "example",
+        "components": [{"reference": "R1", "nets": ["GND"]}],
+        "nets": [{"name": "GND"}],
+        "capabilities": {"circuit": {"status": "available", "detail": "ready"}},
+        "geometry": {"top_preview_path": "bad.svg", "bottom_preview_path": "good.svg"},
+        "artifacts": {"logical_netlist": "logical.xml"},
+    }
+    bundle = tmp_path / "project.json"
+    bundle.write_text(json.dumps(payload))
+    loaded = load_bundle(bundle)
+    assert loaded.geometry.top_preview_path is None
+    assert loaded.geometry.bottom_preview_path == str(good.resolve())
+    assert good.read_text() == content
+    assert loaded.nets == ()
+    assert loaded.components[0].nets == ()
+    assert loaded.capabilities.circuit.status == CapabilityStatus.INVALID
+    assert sum(d.code == "BUNDLE_XML_INVALID" for d in loaded.diagnostics) == 2
+
+
+def test_bundle_rejects_missing_declared_logical_netlist(tmp_path: Path) -> None:
+    from smd_twin_lab.importers.bundle import load_bundle
+
+    bundle = tmp_path / "project.json"
+    bundle.write_text(
+        json.dumps(
+            {
+                "project_id": "example",
+                "components": [{"reference": "R1", "nets": ["GND"]}],
+                "nets": [{"name": "GND"}],
+                "capabilities": {"circuit": {"status": "available"}},
+                "artifacts": {"logical_netlist": "missing.xml"},
+            }
+        )
+    )
+    loaded = load_bundle(bundle)
+    assert loaded.nets == ()
+    assert loaded.components[0].nets == ()
+    assert loaded.capabilities.circuit.status == CapabilityStatus.INVALID
+    assert any(d.code == "BUNDLE_XML_INVALID" for d in loaded.diagnostics)
+
+
+def test_bundle_rejects_changed_logical_netlist(tmp_path: Path) -> None:
+    from smd_twin_lab.importers.bundle import load_bundle
+
+    (tmp_path / "logical.xml").write_text("<export/>")
+    bundle = tmp_path / "project.json"
+    bundle.write_text(
+        json.dumps(
+            {
+                "project_id": "example",
+                "components": [{"reference": "R1", "nets": ["GND"]}],
+                "nets": [{"name": "GND"}],
+                "capabilities": {"circuit": {"status": "available"}},
+                "artifacts": {"logical_netlist": "logical.xml"},
+            }
+        )
+    )
+    loaded = load_bundle(bundle)
+    assert loaded.nets == ()
+    assert loaded.components[0].nets == ()
+    assert loaded.capabilities.circuit.status == CapabilityStatus.INVALID
+    assert any(d.code == "BUNDLE_XML_INVALID" for d in loaded.diagnostics)
+
+
+def test_bundle_rejects_missing_normalized_logical_components(tmp_path: Path) -> None:
+    from smd_twin_lab.importers.bundle import load_bundle
+
+    (tmp_path / "logical.xml").write_text(
+        '<export><components><comp ref="R1"/></components><nets>'
+        '<net name="GND"><node ref="R1" pin="1"/></net></nets></export>'
+    )
+    bundle = tmp_path / "project.json"
+    bundle.write_text(
+        json.dumps(
+            {
+                "project_id": "example",
+                "components": [],
+                "nets": [{"name": "GND", "pins": [{"reference": "R1", "pin": "1"}]}],
+                "capabilities": {"circuit": {"status": "available"}},
+                "artifacts": {"logical_netlist": "logical.xml"},
+            }
+        )
+    )
+    loaded = load_bundle(bundle)
+    assert loaded.capabilities.circuit.status == CapabilityStatus.INVALID
+    assert any(d.code == "BUNDLE_XML_INVALID" for d in loaded.diagnostics)
+
+
+def test_bundle_rejects_extra_unconnected_logical_component(tmp_path: Path) -> None:
+    from smd_twin_lab.importers.bundle import load_bundle
+
+    (tmp_path / "logical.xml").write_text(
+        '<export><components><comp ref="R1"/><comp ref="R2"/></components><nets/></export>'
+    )
+    bundle = tmp_path / "project.json"
+    bundle.write_text(
+        json.dumps(
+            {
+                "project_id": "example",
+                "components": [{"reference": "R1", "nets": []}],
+                "nets": [],
+                "capabilities": {"circuit": {"status": "available"}},
+                "artifacts": {"logical_netlist": "logical.xml"},
+            }
+        )
+    )
+    loaded = load_bundle(bundle)
+    assert loaded.capabilities.circuit.status == CapabilityStatus.INVALID
+    assert any(d.code == "BUNDLE_XML_INVALID" for d in loaded.diagnostics)
+
+
 def test_direct_bundle_load_does_not_discover_or_run_kicad(tmp_path: Path) -> None:
     bundle = tmp_path / "portable bundle"
     bundle.mkdir()

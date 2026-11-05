@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..localization import LanguageManager, current_language_manager
 from ..models import Component, ComponentSide, ImportedProject
+from .safe_svg import UnsafeSvg, prepare_svg
 
 try:
+    from PySide6.QtSvg import QSvgRenderer
     from PySide6.QtSvgWidgets import QGraphicsSvgItem
 except ImportError:  # pragma: no cover - depends on the Qt wheel split
     QGraphicsSvgItem = None  # type: ignore[assignment,misc]
 
 
 _REFERENCE_ROLE = 1
+_LOGGER = logging.getLogger(__name__)
 
 
 class BoardView(QtWidgets.QGraphicsView):
@@ -168,7 +172,18 @@ class BoardView(QtWidgets.QGraphicsView):
             path = Path(project.source_dir) / path
         if not path.is_file() or path.suffix.lower() != ".svg":
             return
-        svg_item = QGraphicsSvgItem(str(path))
+        try:
+            svg_data = prepare_svg(path)
+        except UnsafeSvg as exc:
+            _LOGGER.warning("Skipping SVG preview %s: %s", path, exc)
+            return
+        svg_item = QGraphicsSvgItem()
+        # The item owns the renderer; Qt must only see the validated snapshot.
+        renderer = QSvgRenderer(QtCore.QByteArray(svg_data), svg_item)
+        if not renderer.isValid():
+            _LOGGER.warning("Skipping SVG preview %s: Qt could not render it", path)
+            return
+        svg_item.setSharedRenderer(renderer)
         bounds = svg_item.boundingRect()
         if bounds.width() <= 0 or bounds.height() <= 0:
             return

@@ -152,3 +152,20 @@ def test_preview_requires_available_kicad_cli(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError, match="kicad-cli"):
         catalog.render_preview("Device:R", tmp_path / "preview")
+
+
+def test_catalog_search_treats_sql_syntax_as_data(tmp_path: Path) -> None:
+    symbol_table, footprint_table, _ = _write_fixture_catalog(tmp_path)
+    catalog = LibraryCatalog(
+        tmp_path / "catalog.sqlite3",
+        table_paths=(symbol_table, footprint_table),
+        kicad_cli=tmp_path / "missing.exe",
+        environment={
+            "FIXTURE_SYMBOL_DIR": str(tmp_path / "symbols"),
+            "FIXTURE_FOOTPRINT_DIR": str(tmp_path / "footprints"),
+        },
+    )
+    catalog.refresh()
+
+    assert catalog.search("' OR 1=1 --") == ()
+    assert [part.identifier for part in catalog.search("Device:R")] == ["Device:R"]
