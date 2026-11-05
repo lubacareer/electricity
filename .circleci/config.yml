@@ -23,7 +23,9 @@ jobs:
               fi
               pr_repo="https://github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}.git"
               pr_number="${BASH_REMATCH[3]}"
-              git fetch --depth=50 "$pr_repo" "refs/pull/${pr_number}/head"
+              # Include the triggering commit even if this queued build is far
+              # behind the current PR head.
+              git fetch "$pr_repo" "refs/pull/${pr_number}/head"
             else
               git fetch --depth=1 origin "$CIRCLE_SHA1"
             fi

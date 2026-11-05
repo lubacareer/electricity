@@ -22,7 +22,7 @@ from PySide6.QtSvgWidgets import QGraphicsSvgItem
 
 from smd_twin_lab.importers.bundle import load_bundle
 from smd_twin_lab.models import ComponentSide
-from smd_twin_lab.ui import board_canvas
+from smd_twin_lab.ui import board_canvas, safe_svg
 from smd_twin_lab.ui.safe_svg import MAX_TOTAL_BYTES, MAX_XML_NODES, UnsafeSvg, prepare_svg
 
 SVG_OPEN = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
@@ -154,6 +154,43 @@ def test_unsupported_elements_and_styles_are_rejected(tmp_path: Path, body: str)
     path.write_text(SVG_OPEN + body + "</svg>", encoding="utf-8")
     with pytest.raises(UnsafeSvg):
         prepare_svg(path)
+
+
+@pytest.mark.parametrize(
+    ("value", "references"),
+    [
+        ("fill:red", []),
+        ("fill:url(#a)", ["a"]),
+        ("fill:URL( '#a-1' );clip-path:url(\"#_b\")", ["a-1", "_b"]),
+    ],
+)
+def test_css_internal_references_are_collected(value: str, references: list[str]) -> None:
+    assert safe_svg._check_css(value) == references
+
+
+@pytest.mark.parametrize(
+    "value", ["url(https://example.test/x)", "url(#a", "url(#a) url(", "url(#a(b))"]
+)
+def test_malformed_or_external_css_references_are_rejected(value: str) -> None:
+    with pytest.raises(UnsafeSvg):
+        safe_svg._check_css(value)
+
+
+def test_css_repeated_unclosed_urls_fail_on_first_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = safe_svg._URL_FRAGMENT
+    calls = []
+
+    class CountMatches:
+        def match(self, value: str, position: int):
+            calls.append(position)
+            return original.match(value, position)
+
+    monkeypatch.setattr(safe_svg, "_URL_FRAGMENT", CountMatches())
+    with pytest.raises(UnsafeSvg):
+        safe_svg._check_css("url(" * 100_000)
+    assert calls == [4]
 
 
 def test_limits_apply_to_nested_resources(tmp_path: Path) -> None:

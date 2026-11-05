@@ -58,7 +58,8 @@ _ELEMENTS = frozenset(
         "style",
     }
 )
-_URL = re.compile(r"url\s*\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE)
+_URL_START = re.compile(r"url\s*\(", re.IGNORECASE)
+_URL_FRAGMENT = re.compile(r"\s*(['\"]?)(#[A-Za-z_][A-Za-z0-9_.:-]*)\1\s*\)")
 
 
 class UnsafeSvg(ValueError):
@@ -205,13 +206,15 @@ def _check_css(value: str) -> list[str]:
     if "\\" in value or "@" in value or "/*" in value:
         raise UnsafeSvg("CSS escapes, comments and at-rules are unsupported")
     references = []
-    for match in _URL.finditer(value):
-        if not re.fullmatch(r"#[A-Za-z_][A-Za-z0-9_.:-]*", match.group(2)):
-            raise UnsafeSvg("external CSS resources are unsupported")
-        references.append(match.group(2)[1:])
-    # Reject malformed or obfuscated url() rather than handing it to Qt.
-    if re.search(r"url\s*\(", _URL.sub("", value), re.IGNORECASE):
-        raise UnsafeSvg("unsupported CSS resource reference")
+    position = 0
+    while start := _URL_START.search(value, position):
+        # Fail at the first malformed reference rather than repeatedly scanning the
+        # remainder of an attacker-controlled value for a closing parenthesis.
+        fragment = _URL_FRAGMENT.match(value, start.end())
+        if fragment is None:
+            raise UnsafeSvg("external or malformed CSS resources are unsupported")
+        references.append(fragment.group(2)[1:])
+        position = fragment.end()
     return references
 
 

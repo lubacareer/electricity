@@ -112,8 +112,10 @@ and grouping subset are rejected. SVG previews must declare bounded absolute
 width and height, or a viewBox when both dimensions are absent. Image sizes are
 bounded and referenced files must be regular files. Relative
 image files are supported on Windows and Linux only, where their opened file
-handles can be checked. A rejected preview is skipped and reported in the
-application log; the rest of the project can still be inspected.
+handles can be checked. Bundle loading reports invalid SVG XML with a
+`BUNDLE_XML_INVALID` diagnostic and removes the preview path. Previews rejected
+later during rendering are skipped with an application-log warning; the rest of
+the project can still be inspected.
 
 ## Honest current status
 
