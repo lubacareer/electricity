@@ -310,6 +310,29 @@ def test_bundle_rejects_missing_normalized_logical_components(tmp_path: Path) ->
     assert any(d.code == "BUNDLE_XML_INVALID" for d in loaded.diagnostics)
 
 
+def test_bundle_rejects_extra_unconnected_logical_component(tmp_path: Path) -> None:
+    from smd_twin_lab.importers.bundle import load_bundle
+
+    (tmp_path / "logical.xml").write_text(
+        '<export><components><comp ref="R1"/><comp ref="R2"/></components><nets/></export>'
+    )
+    bundle = tmp_path / "project.json"
+    bundle.write_text(
+        json.dumps(
+            {
+                "project_id": "example",
+                "components": [{"reference": "R1", "nets": []}],
+                "nets": [],
+                "capabilities": {"circuit": {"status": "available"}},
+                "artifacts": {"logical_netlist": "logical.xml"},
+            }
+        )
+    )
+    loaded = load_bundle(bundle)
+    assert loaded.capabilities.circuit.status == CapabilityStatus.INVALID
+    assert any(d.code == "BUNDLE_XML_INVALID" for d in loaded.diagnostics)
+
+
 def test_direct_bundle_load_does_not_discover_or_run_kicad(tmp_path: Path) -> None:
     bundle = tmp_path / "portable bundle"
     bundle.mkdir()
